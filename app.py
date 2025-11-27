@@ -6,7 +6,7 @@ import random
 import re
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | CLEAN INTERFACE", layout="wide")
+st.set_page_config(page_title="ETHER | CLEAN FIX", layout="wide")
 
 # --- STYLE CSS ---
 st.markdown("""
@@ -19,16 +19,19 @@ st.markdown("""
         background-color: #1a1c24;
         padding: 10px;
         border-radius: 10px;
+        margin-top: 20px;
     }
     .stTabs [data-baseweb="tab"] {
         background-color: #333;
         border-radius: 5px;
         color: white;
         padding: 5px 20px;
+        border: 1px solid #555;
     }
     .stTabs [aria-selected="true"] {
         background-color: #3b82f6 !important;
         font-weight: bold;
+        border: 1px solid #3b82f6;
     }
     
     /* PANELE */
@@ -38,6 +41,15 @@ st.markdown("""
         border-radius: 10px;
         border: 1px solid #444;
         margin-top: 15px;
+    }
+    
+    /* GŁÓWNY WYBÓR TYGODNIA */
+    .week-selector {
+        background-color: #1a1c24;
+        padding: 15px;
+        border-radius: 10px;
+        border-left: 5px solid #d93025;
+        margin-bottom: 10px;
     }
     
     /* TABELA GRAFIKU */
@@ -283,20 +295,21 @@ if st.session_state.user_role == "manager":
         next_friday = today + timedelta(days=days_ahead)
         if today.weekday() == 4: next_friday = today
 
-        st.markdown(f"<div class='section-card'><div class='section-title'>1. Wybierz Tydzień</div>", unsafe_allow_html=True)
-        week_start = st.date_input("Start cyklu (Tylko przyszłe Piątki):", next_friday, min_value=today)
+        # GŁÓWNY WYBÓR DATY (BEZ DUCHÓW)
+        st.markdown(f"<div class='week-selector'>", unsafe_allow_html=True)
+        week_start = st.date_input("📅 Wybierz Tydzień (Start: Piątek)", next_friday, min_value=today)
+        
+        # Obliczenie końca tygodnia
+        week_end = week_start + timedelta(days=6)
+        st.markdown(f"**Planujesz grafik na okres:** {week_start.strftime('%d.%m.%Y')} (Pt) - {week_end.strftime('%d.%m.%Y')} (Cz)")
         st.markdown("</div>", unsafe_allow_html=True)
         
         preload_demo_data(week_start)
         
-        # Generowanie Dni
         week_days = [week_start + timedelta(days=i) for i in range(7)]
         day_labels = ["PIĄTEK", "SOBOTA", "NIEDZIELA", "PONIEDZIAŁEK", "WTOREK", "ŚRODA", "CZWARTEK"]
-        
-        # Przechowujemy konfig
         week_config = []
         
-        # ZAKŁADKI (TABS) - Nowy UI
         tabs = st.tabs([f"{day_labels[i]} {d.strftime('%d.%m')}" for i, d in enumerate(week_days)])
         
         for i, tab in enumerate(tabs):
