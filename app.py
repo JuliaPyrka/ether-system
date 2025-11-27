@@ -6,22 +6,15 @@ import random
 import re
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | STABLE", layout="wide")
+st.set_page_config(page_title="ETHER | FAIR PLAY", layout="wide")
 
-# --- STYLE CSS (MODERN UI) ---
+# --- STYLE CSS ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #e0e0e0; }
     
-    /* BLOKI GENERATORA */
-    .section-card {
-        background-color: #1a1c24;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid #3b82f6;
-        margin-bottom: 20px;
-    }
-    .section-title { font-size: 18px; font-weight: bold; margin-bottom: 10px; color: #fff; }
+    /* BLOKI */
+    .day-card { border: 1px solid #444; padding: 15px; border-radius: 10px; background-color: #1e1e1e; margin-bottom: 10px; }
     
     /* STYL GRAFIKU HTML */
     .schedule-table { width: 100%; border-collapse: collapse; color: #000; background-color: #fff; font-family: Arial, sans-serif; font-size: 11px; }
@@ -75,15 +68,28 @@ def is_avail_compatible(avail_str, shift_type):
         if shift_type == 'morning':
             if (6 <= s <= 12) and (e >= 15 or e <= 4): return True
         elif shift_type == 'evening':
-            if (s <= 17) and (e <= 4 or e >= 22): return True
+            is_start_ok = (s <= 17)
+            is_end_ok = (e <= 4 or e >= 22)
+            if is_start_ok and is_end_ok: return True
     except: return False
     return False
 
-def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, avail_grid, assigned_today):
+# --- ALGORYTM FAIR PLAY (Sprawiedliwość) ---
+def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, avail_grid, assigned_today, shift_counts):
+    """
+    Znajduje pracownika, biorąc pod uwagę:
+    1. Kwalifikacje
+    2. Dyspozycyjność (z kartki)
+    3. Konflikty (czy już nie pracuje dziś)
+    4. PŁEĆ (Obsługa = Chłopaki priorytet)
+    5. SPRAWIEDLIWOŚĆ (Kto ma najmniej zmian?)
+    """
     candidates = []
     for idx, emp in employees_df.iterrows():
-        if emp['Imie'] in assigned_today[shift_time_type]: continue # Już pracuje w tej porze
-        
+        # Conflict Guard
+        if emp['Imie'] in assigned_today[shift_time_type]: continue 
+        if emp['Imie'] in assigned_today['all_day']: continue # Jeśli ktoś już był, dajemy szansę innym (chyba że braknie ludzi)
+
         role_base = role_needed.replace(" 1", "").replace(" 2", "")
         if role_base in emp['Role'] or role_base in emp['Auto']:
             key = f"{emp['Imie']}_{date_obj.strftime('%Y-%m-%d')}"
@@ -93,18 +99,24 @@ def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, 
 
     if not candidates: return None
 
-    # Preferencje Płci
-    final_candidate = None
+    # SORTOWANIE PO ILOŚCI ZMIAN (FAIR PLAY)
+    # Dodajemy do każdego kandydata jego aktualną liczbę zmian
+    candidates_sorted = sorted(candidates, key=lambda x: shift_counts.get(x['Imie'], 0))
+    
+    # Teraz candidates_sorted[0] to osoba najbardziej "głodna" zmian (ma ich najmniej)
+    
+    # Gender Bias (tylko dla Obsługi)
     if role_needed == "Obsługa":
-        men = [c['Imie'] for c in candidates if c['Plec'] == 'M']
-        if men: final_candidate = random.choice(men)
-        else:
-            women = [c['Imie'] for c in candidates if c['Plec'] == 'K']
-            if women: final_candidate = random.choice(women)
-    else:
-        final_candidate = random.choice([c['Imie'] for c in candidates])
+        men = [c for c in candidates_sorted if c.get('Plec', 'K') == 'M']
+        women = [c for c in candidates_sorted if c.get('Plec', 'M') == 'K']
         
-    return final_candidate
+        # Jeśli są faceci, bierzemy tego z najmniejszą liczbą zmian
+        if men: return men[0] 
+        # Jak nie, bierzemy kobietę z najmniejszą liczbą zmian
+        if women: return women[0]
+        
+    # Dla innych stanowisk - po prostu bierzemy tego z najmniejszą liczbą zmian
+    return candidates_sorted[0]
 
 # --- GENERATOR HTML ---
 def render_html_schedule(df_shifts, start_date):
@@ -179,7 +191,7 @@ def preload_demo_data(start_date):
             st.session_state.avail_grid[key] = val
 
 # --- PAMIĘĆ SESJI ---
-if 'employees' not in st.session_state:
+def reset_database():
     raw_data = [
         {"Imie": "Julia Bąk", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"], "Plec": "K"},
         {"Imie": "Kacper Borzechowski", "Role": ["Bar", "Obsługa", "Plakaty (Techniczne)"], "Plec": "M"},
@@ -212,6 +224,7 @@ if 'employees' not in st.session_state:
         rows.append({"ID": i+1, "Imie": p["Imie"], "Role": p["Role"], "Plec": p["Plec"], "Auto": calculate_auto_roles(p["Role"])})
     st.session_state.employees = pd.DataFrame(rows)
 
+if 'employees' not in st.session_state or 'Plec' not in st.session_state.employees.columns: reset_database()
 if 'shifts' not in st.session_state: st.session_state.shifts = pd.DataFrame(columns=["Data", "Stanowisko", "Godziny", "Pracownik_Imie", "Typ"])
 if 'avail_grid' not in st.session_state: st.session_state.avail_grid = {}
 
@@ -241,12 +254,12 @@ if not st.session_state.logged_in:
 if st.session_state.user_role == "manager":
     with st.sidebar:
         st.title("🔧 PANEL KIEROWNIKA")
-        menu = st.radio("Nawigacja:", ["Auto-Planer (LOGISTIC)", "Dyspozycje (Szybkie)", "Kadry", "Grafik (WIZUALNY)"])
+        menu = st.radio("Nawigacja:", ["Auto-Planer (TYDZIEŃ)", "Dyspozycje", "Kadry", "Grafik (WIZUALNY)"])
         if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
 
     # --- 1. AUTO-PLANER (LOGISTIC) ---
-    if menu == "Auto-Planer (LOGISTIC)":
-        st.title("🚀 Generator Logistyczny")
+    if menu == "Auto-Planer (TYDZIEŃ)":
+        st.title("🚀 Generator Tygodniowy (Pełna Kontrola)")
         
         today = datetime.now().date()
         days_ahead = 4 - today.weekday()
@@ -254,79 +267,101 @@ if st.session_state.user_role == "manager":
         next_friday = today + timedelta(days=days_ahead)
         if today.weekday() == 4: next_friday = today
 
-        st.markdown(f"<div class='section-card'><div class='section-title'>1. Wybierz Tydzień</div>", unsafe_allow_html=True)
-        week_start = st.date_input("Start cyklu (Tylko przyszłe Piątki):", next_friday, min_value=today)
-        st.markdown("</div>", unsafe_allow_html=True)
-        
+        week_start = st.date_input("Start cyklu (Piątek):", next_friday, min_value=today)
         preload_demo_data(week_start)
-
-        col_time, col_staff = st.columns([1, 1])
         
-        with col_time:
-            st.markdown("<div class='section-card'><div class='section-title'>2. Godziny Filmów</div>", unsafe_allow_html=True)
-            first_movie = st.time_input("Start 1. filmu:", time(9,0))
-            last_movie_start = st.time_input("Start ostatniego:", time(21,0))
-            last_movie_end = st.time_input("Koniec ostatniego:", time(0,0))
-            st.markdown("</div>", unsafe_allow_html=True)
-            
-        with col_staff:
-            st.markdown("<div class='section-card'><div class='section-title'>3. Obsada (Ile osób?)</div>", unsafe_allow_html=True)
-            c1, c2 = st.columns(2)
-            count_kasa = c1.selectbox("KASA", [0, 1, 2], index=1)
-            count_cafe = c2.selectbox("CAFE", [0, 1, 2], index=1)
-            c3, c4 = st.columns(2)
-            count_bar1 = c3.selectbox("BAR 1", [0, 1, 2, 3], index=1)
-            count_bar2 = c4.selectbox("BAR 2", [0, 1, 2], index=1)
-            c5, c6 = st.columns(2)
-            count_obs_morn = c5.selectbox("OBSŁUGA (Rano)", [1, 2, 3], index=0)
-            count_obs_even = c6.selectbox("OBSŁUGA (Wieczór)", [1, 2, 3, 4], index=1)
-            st.markdown("</div>", unsafe_allow_html=True)
+        # OBLICZANIE DAT TYGODNIA
+        week_days = [week_start + timedelta(days=i) for i in range(7)]
+        day_labels = ["PIĄTEK", "SOBOTA", "NIEDZIELA", "PONIEDZIAŁEK", "WTOREK", "ŚRODA", "CZWARTEK"]
+        
+        # ZMIENNA NA KONFIGURACJĘ CAŁEGO TYGODNIA
+        week_config = []
 
-        if st.button("⚡ GENERUJ CAŁY TYDZIEŃ", type="primary"):
-            days_to_generate = [week_start + timedelta(days=i) for i in range(7)]
-            mask = (st.session_state.shifts['Data'] >= days_to_generate[0]) & (st.session_state.shifts['Data'] <= days_to_generate[-1])
+        # TABS DLA KAŻDEGO DNIA
+        tabs = st.tabs([f"{day_labels[i]} {d.strftime('%d.%m')}" for i, d in enumerate(week_days)])
+        
+        for i, tab in enumerate(tabs):
+            with tab:
+                st.markdown(f"### Konfiguracja: {day_labels[i]}")
+                
+                c_t1, c_t2, c_t3 = st.columns(3)
+                start_1 = c_t1.time_input(f"1. Film ({day_labels[i]})", time(9,0), key=f"t1_{i}")
+                start_last = c_t2.time_input(f"Start Ostatniego ({day_labels[i]})", time(21,0), key=f"t2_{i}")
+                end_last = c_t3.time_input(f"Koniec Ostatniego ({day_labels[i]})", time(0,0), key=f"t3_{i}")
+                
+                st.markdown("#### Obsada w tym dniu:")
+                c1, c2, c3, c4, c5, c6 = st.columns(6)
+                kasa = c1.selectbox(f"KASA", [0,1,2], index=1, key=f"k_{i}")
+                bar1 = c2.selectbox(f"BAR 1", [0,1,2,3], index=1, key=f"b1_{i}")
+                bar2 = c3.selectbox(f"BAR 2", [0,1,2], index=1, key=f"b2_{i}")
+                cafe = c4.selectbox(f"CAFE", [0,1,2], index=1, key=f"c_{i}")
+                obs_m = c5.selectbox(f"OBS RANO", [1,2,3], index=1, key=f"om_{i}")
+                obs_e = c6.selectbox(f"OBS NOC", [1,2,3,4], index=2, key=f"oe_{i}")
+                
+                # Zapisujemy konfig dnia
+                week_config.append({
+                    "date": week_days[i],
+                    "times": (start_1, start_last, end_last),
+                    "counts": (kasa, bar1, bar2, cafe, obs_m, obs_e)
+                })
+
+        st.write("---")
+        if st.button("⚡ GENERUJ GRAFIK DLA CAŁEGO TYGODNIA", type="primary"):
+            
+            # 1. Czyszczenie
+            mask = (st.session_state.shifts['Data'] >= week_days[0]) & (st.session_state.shifts['Data'] <= week_days[-1])
             st.session_state.shifts = st.session_state.shifts[~mask]
             
-            dt_start = datetime.combine(datetime.today(), first_movie) - timedelta(minutes=45)
-            t_open = dt_start.strftime("%H:%M")
-            t_bar_end = (datetime.combine(datetime.today(), last_movie_start) + timedelta(minutes=15)).strftime("%H:%M")
-            t_obs_end = (datetime.combine(datetime.today(), last_movie_end) + timedelta(minutes=15)).strftime("%H:%M")
-            t_split = "16:00"
+            # 2. Reset liczników zmian (dla sprawiedliwości w tym tygodniu)
+            shift_counts = {emp['Imie']: 0 for _, emp in st.session_state.employees.iterrows()}
             
-            cnt = 0
-            for day in days_to_generate:
-                assigned_today = {'morning': [], 'evening': []}
+            total_shifts = 0
+            
+            for day_cfg in week_config:
+                current_date = day_cfg['date']
+                s1, sl, el = day_cfg['times']
+                k, b1, b2, c, om, oe = day_cfg['counts']
+                
+                # Obliczenia godzin dla tego dnia
+                dt_start = datetime.combine(datetime.today(), s1) - timedelta(minutes=45)
+                t_open = dt_start.strftime("%H:%M")
+                t_bar_end = (datetime.combine(datetime.today(), sl) + timedelta(minutes=15)).strftime("%H:%M")
+                t_obs_end = (datetime.combine(datetime.today(), el) + timedelta(minutes=15)).strftime("%H:%M")
+                t_split = "16:00"
+                
                 daily_tasks = []
+                for _ in range(k): daily_tasks.append(("Kasa", "morning", t_open, t_split)); daily_tasks.append(("Kasa", "evening", t_split, t_bar_end))
+                for _ in range(b1): daily_tasks.append(("Bar 1", "morning", t_open, t_split)); daily_tasks.append(("Bar 1", "evening", t_split, t_bar_end))
+                for _ in range(b2): daily_tasks.append(("Bar 2", "morning", t_open, t_split)); daily_tasks.append(("Bar 2", "evening", t_split, t_bar_end))
+                for _ in range(c): daily_tasks.append(("Cafe", "morning", t_open, t_split)); daily_tasks.append(("Cafe", "evening", t_split, t_bar_end))
+                for _ in range(om): daily_tasks.append(("Obsługa", "morning", t_open, t_split))
+                for _ in range(oe): daily_tasks.append(("Obsługa", "evening", t_split, t_obs_end))
                 
-                for _ in range(count_kasa): daily_tasks.append(("Kasa", "morning", t_open, t_split))
-                for _ in range(count_bar1): daily_tasks.append(("Bar 1", "morning", t_open, t_split))
-                for _ in range(count_bar2): daily_tasks.append(("Bar 2", "morning", t_open, t_split))
-                for _ in range(count_cafe): daily_tasks.append(("Cafe", "morning", t_open, t_split))
-                for _ in range(count_obs_morn): daily_tasks.append(("Obsługa", "morning", t_open, t_split))
-                
-                for _ in range(count_kasa): daily_tasks.append(("Kasa", "evening", t_split, t_bar_end))
-                for _ in range(count_bar1): daily_tasks.append(("Bar 1", "evening", t_split, t_bar_end))
-                for _ in range(count_bar2): daily_tasks.append(("Bar 2", "evening", t_split, t_bar_end))
-                for _ in range(count_cafe): daily_tasks.append(("Cafe", "evening", t_split, t_bar_end))
-                for _ in range(count_obs_even): daily_tasks.append(("Obsługa", "evening", t_split, t_obs_end))
+                # Przydział
+                assigned_today = {'morning': [], 'evening': [], 'all_day': []}
                 
                 for role, t_type, s, e in daily_tasks:
-                    worker = find_worker_for_shift(role, t_type, day, st.session_state.employees, st.session_state.avail_grid, assigned_today)
-                    final = worker if worker else "WAKAT"
+                    # Szukamy pracownika
+                    worker_row = find_worker_for_shift(role, t_type, current_date, st.session_state.employees, st.session_state.avail_grid, assigned_today, shift_counts)
+                    
+                    final = worker_row['Imie'] if worker_row is not None else "WAKAT"
+                    
                     st.session_state.shifts.loc[len(st.session_state.shifts)] = {
-                        "Data": day, "Stanowisko": role, "Godziny": f"{s}-{e}", "Pracownik_Imie": final, "Typ": "Auto"
+                        "Data": current_date, "Stanowisko": role, "Godziny": f"{s}-{e}", "Pracownik_Imie": final, "Typ": "Auto"
                     }
-                    if worker: 
-                        # --- NAPRAWA BŁĘDU ---
-                        # worker jest teraz napisem (string), bo tak zwraca go find_worker_for_shift
-                        # więc po prostu dodajemy go do listy
-                        assigned_today[t_type].append(worker)
-                    cnt += 1
+                    
+                    if worker_row is not None:
+                        assigned_today[t_type].append(final)
+                        assigned_today['all_day'].append(final)
+                        shift_counts[final] += 1 # +1 do licznika zmian
+                    
+                    total_shifts += 1
             
-            st.success(f"Wygenerowano {cnt} zmian! Przejdź do zakładki 'Grafik (WIZUALNY)'.")
+            st.balloons()
+            st.success(f"Sukces! Rozdzielono {total_shifts} zmian w oparciu o algorytm FAIR PLAY.")
 
     # --- 2. DYSPOZYCJE ---
-    elif menu == "Dyspozycje (Szybkie)":
+    elif menu == "Dyspozycje":
         st.title("📥 Dyspozycje")
         today = datetime.now().date()
         d_start = st.date_input("Start tygodnia (Piątek):", today, min_value=today)
