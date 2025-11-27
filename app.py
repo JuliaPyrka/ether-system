@@ -6,33 +6,34 @@ import random
 import re
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | FINAL POLISH", layout="wide")
+st.set_page_config(page_title="ETHER | CINEMA PRO", layout="wide")
 
 # --- STYLE CSS ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #e0e0e0; }
     
-    /* STYL GRAFIKU HTML */
+    /* PANEL DNIA W GENERATORZE */
+    .day-config-card {
+        background-color: #1a1c24;
+        border: 1px solid #444;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 20px;
+        border-left: 5px solid #3b82f6;
+    }
+    .day-title { font-size: 20px; font-weight: bold; color: #fff; margin-bottom: 10px; border-bottom: 1px solid #555; padding-bottom: 5px; }
+    
+    /* TABELA GRAFIKU */
     .schedule-table { width: 100%; border-collapse: collapse; color: #000; background-color: #fff; font-family: Arial, sans-serif; font-size: 11px; }
-    
     .schedule-table th { background-color: #444; color: #fff; padding: 8px; border: 1px solid #777; text-align: center; }
-    
-    /* DOMYŚLNA KOMÓRKA */
     .schedule-table td { border: 1px solid #ccc; padding: 4px; vertical-align: top; text-align: center; height: 60px; width: 12.5%; }
-    
-    /* WYRÓŻNIENIE WTORKU I WEEKENDU (Lekki błękit) */
     .highlight-day { background-color: #e3f2fd !important; } 
-    
     .role-header { background-color: #eee; font-weight: bold; text-align: center; vertical-align: middle !important; border: 1px solid #999; font-size: 12px; }
-    
     .shift-box { background-color: #fff; border: 1px solid #aaa; border-radius: 3px; margin-bottom: 3px; padding: 2px; box-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
     .shift-time { font-weight: bold; display: block; color: #000; font-size: 10px; }
     .shift-name { display: block; color: #333; text-transform: uppercase; font-size: 9px; line-height: 1.1; }
     .day-header { font-size: 12px; text-transform: uppercase; font-weight: bold; }
-    
-    .section-card { background-color: #1a1c24; padding: 20px; border-radius: 10px; border-left: 5px solid #3b82f6; margin-bottom: 20px; }
-    .section-title { font-size: 18px; font-weight: bold; margin-bottom: 10px; color: #fff; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -91,7 +92,6 @@ def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, 
     if not candidates: return None
 
     final_candidate = None
-    # Preferencje Płci dla Obsługi
     if role_needed == "Obsługa":
         men = [c['Imie'] for c in candidates if c.get('Plec', 'K') == 'M']
         if men: final_candidate = random.choice(men)
@@ -103,12 +103,13 @@ def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, 
         
     return final_candidate
 
-# --- GENERATOR HTML (Z KOLOROWANIEM DNI) ---
+# --- GENERATOR HTML ---
 def render_html_schedule(df_shifts, start_date):
-    pl_days = {0: "PON", 1: "WTO", 2: "ŚRO", 3: "CZW", 4: "PT", 5: "SOB", 6: "ND"}
+    pl_days = {0: "PIĄTEK", 1: "SOBOTA", 2: "NIEDZIELA", 3: "PONIEDZIAŁEK", 4: "WTOREK", 5: "ŚRODA", 6: "CZWARTEK"}
+    # Generujemy listę dni (Piątek -> Czwartek)
+    # start_date to Piątek
     days = [start_date + timedelta(days=i) for i in range(7)]
     
-    # Header Dat
     date_header_str = f"{start_date.strftime('%d.%m')} - {days[-1].strftime('%d.%m')}"
     
     html = f"""
@@ -119,10 +120,18 @@ def render_html_schedule(df_shifts, start_date):
     <thead><tr><th style="width: 8%;">STANOWISKO</th>
     """
     
+    # Kolumny dni
     for d in days:
-        d_name = pl_days[d.weekday()]
-        # Kolorowanie nagłówka dla Wt (1), Sob (5), Nd (6)
-        style = 'style="background-color: #2c5282;"' if d.weekday() in [1, 5, 6] else ''
+        # Weekday: 0=Mon, 4=Fri, 5=Sat, 6=Sun
+        # Nasz pl_days ma klucze 0..6 odpowiadające kolejności wyświetlania, a nie weekday()
+        # Musimy zmapować weekday() na nazwę
+        w_day = d.weekday()
+        # Mapa nazw: 4->Pt, 5->Sb, 6->Nd, 0->Pn...
+        day_map = {4:"PIĄTEK", 5:"SOBOTA", 6:"NIEDZIELA", 0:"PONIEDZIAŁEK", 1:"WTOREK", 2:"ŚRODA", 3:"CZWARTEK"}
+        d_name = day_map[w_day]
+        
+        # Kolorowanie nagłówka (Wtorek=1, Sob=5, Nd=6)
+        style = 'style="background-color: #2c5282;"' if w_day in [1, 5, 6] else ''
         html += f'<th {style}><div class="day-header">{d_name}<br>{d.strftime("%d.%m")}</div></th>'
     html += '</tr></thead><tbody>'
     
@@ -131,8 +140,8 @@ def render_html_schedule(df_shifts, start_date):
     for role in visual_roles:
         html += f'<tr><td class="role-header">{role.upper()}</td>'
         for d in days:
-            # Kolorowanie komórki dla Wt (1), Sob (5), Nd (6)
-            td_class = 'class="highlight-day"' if d.weekday() in [1, 5, 6] else ''
+            w_day = d.weekday()
+            td_class = 'class="highlight-day"' if w_day in [1, 5, 6] else ''
             
             current_shifts = df_shifts[
                 (df_shifts['Data'] == d) & 
@@ -192,6 +201,7 @@ def preload_demo_data(start_date):
         "Damian Siwak": ["8-16", "-", "8-16", "8-16", "8-16", "8-16", "8-16"],
         "Michał Kowalczyk": ["-", "-", "8-16", "8-16", "8-16", "-", "16-1"]
     }
+    # Uwaga: demo_avail zakłada kolejność Pt -> Cz
     days = [start_date + timedelta(days=i) for i in range(7)]
     for name, avails in demo_avail.items():
         for i, val in enumerate(avails):
@@ -227,13 +237,8 @@ def reset_database():
         {"Imie": "Weronika Ziętkowska", "Role": ["Cafe", "Bar", "Obsługa"], "Plec": "K"},
         {"Imie": "Magda Żurowska", "Role": ["Bar", "Obsługa"], "Plec": "K"}
     ]
-    
-    # 1. SORTOWANIE ALFABETYCZNE PO NAZWISKU
-    # Zakładamy format "Imie Nazwisko", bierzemy ostatni człon
     raw_data.sort(key=lambda x: x['Imie'].split()[-1])
-    
     rows = []
-    # 2. NUMERACJA OD 1
     for i, p in enumerate(raw_data):
         rows.append({"ID": i+1, "Imie": p["Imie"], "Role": p["Role"], "Plec": p["Plec"], "Auto": calculate_auto_roles(p["Role"])})
     st.session_state.employees = pd.DataFrame(rows)
@@ -271,92 +276,116 @@ if st.session_state.user_role == "manager":
         menu = st.radio("Nawigacja:", ["Auto-Planer (LOGISTIC)", "Dyspozycje (Szybkie)", "Kadry", "Grafik (WIZUALNY)"])
         if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
 
-    # --- 1. AUTO-PLANER (LOGISTIC) ---
+    # --- 1. AUTO-PLANER ---
     if menu == "Auto-Planer (LOGISTIC)":
-        st.title("🚀 Generator Logistyczny")
+        st.title("🚀 Generator Logistyczny (Piątek-Czwartek)")
         
+        # AUTOMATYCZNY START W PIĄTEK
         today = datetime.now().date()
         days_ahead = 4 - today.weekday()
         if days_ahead <= 0: days_ahead += 7
         next_friday = today + timedelta(days=days_ahead)
-        if today.weekday() == 4: next_friday = today
+        if today.weekday() == 4: next_friday = today # Jeśli dziś piątek, to dziś
 
         st.markdown(f"<div class='section-card'><div class='section-title'>1. Wybierz Tydzień</div>", unsafe_allow_html=True)
-        week_start = st.date_input("Start cyklu (Tylko przyszłe Piątki):", next_friday, min_value=today)
+        # UWAGA: Wymuszamy wybór PIĄTKU (użytkownik nie może wybrać innego dnia tygodnia, chyba że w kalendarzu, ale logika i tak wyrówna)
+        week_start = st.date_input("Start cyklu (PIĄTEK):", next_friday)
+        
+        # Walidacja: Jeśli wybrano nie-piątek, cofnij do piątku
+        if week_start.weekday() != 4:
+            st.warning("⚠️ Wybrano datę, która nie jest Piątkiem! System automatycznie skorygował do poprzedniego Piątku.")
+            week_start = week_start - timedelta(days=(week_start.weekday() - 4) % 7)
+            
+        preload_demo_data(week_start)
+        
+        # Generujemy listę dni
+        week_days = [week_start + timedelta(days=i) for i in range(7)]
+        day_labels = ["PIĄTEK", "SOBOTA", "NIEDZIELA", "PONIEDZIAŁEK", "WTOREK", "ŚRODA", "CZWARTEK"]
+        
         st.markdown("</div>", unsafe_allow_html=True)
         
-        preload_demo_data(week_start)
-
-        col_time, col_staff = st.columns([1, 1])
+        week_config = []
         
-        with col_time:
-            st.markdown("<div class='section-card'><div class='section-title'>2. Godziny Filmów</div>", unsafe_allow_html=True)
-            first_movie = st.time_input("Start 1. filmu:", time(9,0))
-            last_movie_start = st.time_input("Start ostatniego:", time(21,0))
-            last_movie_end = st.time_input("Koniec ostatniego:", time(0,0))
-            st.markdown("</div>", unsafe_allow_html=True)
-            
-        with col_staff:
-            st.markdown("<div class='section-card'><div class='section-title'>3. Obsada (Ile osób?)</div>", unsafe_allow_html=True)
-            c1, c2 = st.columns(2)
-            count_kasa = c1.selectbox("KASA", [0, 1, 2], index=1)
-            count_cafe = c2.selectbox("CAFE", [0, 1, 2], index=1)
-            c3, c4 = st.columns(2)
-            count_bar1 = c3.selectbox("BAR 1", [0, 1, 2, 3], index=1)
-            count_bar2 = c4.selectbox("BAR 2", [0, 1, 2], index=1)
-            c5, c6 = st.columns(2)
-            count_obs_morn = c5.selectbox("OBSŁUGA (Rano)", [1, 2, 3], index=0)
-            count_obs_even = c6.selectbox("OBSŁUGA (Wieczór)", [1, 2, 3, 4], index=1)
-            st.markdown("</div>", unsafe_allow_html=True)
+        # PĘTLA PO DNIACH (DŁUGA LISTA)
+        for i, d in enumerate(week_days):
+            with st.container():
+                st.markdown(f"""
+                <div class='day-config-card'>
+                    <div class='day-title'>{day_labels[i]} ({d.strftime('%d.%m')})</div>
+                """, unsafe_allow_html=True)
+                
+                c_time, c_staff = st.columns([1, 2])
+                
+                with c_time:
+                    st.write("**Godziny Seansów:**")
+                    s1 = st.time_input("Start 1.", time(9,0), key=f"s1_{i}")
+                    sl = st.time_input("Start Ost.", time(21,0), key=f"sl_{i}")
+                    el = st.time_input("Koniec Ost.", time(0,0), key=f"el_{i}")
+                
+                with c_staff:
+                    st.write("**Obsada:**")
+                    c1, c2, c3, c4, c5, c6 = st.columns(6)
+                    k = c1.selectbox("KASA", [0,1,2], index=1, key=f"k_{i}")
+                    b1 = c2.selectbox("BAR 1", [0,1,2,3], index=1, key=f"b1_{i}")
+                    b2 = c3.selectbox("BAR 2", [0,1,2], index=1, key=f"b2_{i}")
+                    c = c4.selectbox("CAFE", [0,1,2], index=1, key=f"c_{i}")
+                    om = c5.selectbox("OBS RANO", [1,2,3], index=1, key=f"om_{i}")
+                    oe = c6.selectbox("OBS NOC", [1,2,3,4], index=2, key=f"oe_{i}")
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+                week_config.append({
+                    "date": d,
+                    "times": (s1, sl, el),
+                    "counts": (k, b1, b2, c, om, oe)
+                })
 
-        if st.button("⚡ GENERUJ CAŁY TYDZIEŃ", type="primary"):
-            days_to_generate = [week_start + timedelta(days=i) for i in range(7)]
-            mask = (st.session_state.shifts['Data'] >= days_to_generate[0]) & (st.session_state.shifts['Data'] <= days_to_generate[-1])
+        st.write("---")
+        if st.button("⚡ GENERUJ GRAFIK (NADCHODZĄCY TYDZIEŃ)", type="primary"):
+            # 1. Czyszczenie
+            mask = (st.session_state.shifts['Data'] >= week_days[0]) & (st.session_state.shifts['Data'] <= week_days[-1])
             st.session_state.shifts = st.session_state.shifts[~mask]
             
-            dt_start = datetime.combine(datetime.today(), first_movie) - timedelta(minutes=45)
-            t_open = dt_start.strftime("%H:%M")
-            t_bar_end = (datetime.combine(datetime.today(), last_movie_start) + timedelta(minutes=15)).strftime("%H:%M")
-            t_obs_end = (datetime.combine(datetime.today(), last_movie_end) + timedelta(minutes=15)).strftime("%H:%M")
-            t_split = "16:00"
-            
             cnt = 0
-            for day in days_to_generate:
-                assigned_today = {'morning': [], 'evening': []}
+            for day_cfg in week_config:
+                current_date = day_cfg['date']
+                s1, sl, el = day_cfg['times']
+                k, b1, b2, c, om, oe = day_cfg['counts']
+                
+                dt_start = datetime.combine(datetime.today(), s1) - timedelta(minutes=45)
+                t_open = dt_start.strftime("%H:%M")
+                t_bar_end = (datetime.combine(datetime.today(), sl) + timedelta(minutes=15)).strftime("%H:%M")
+                t_obs_end = (datetime.combine(datetime.today(), el) + timedelta(minutes=15)).strftime("%H:%M")
+                t_split = "16:00"
+                
                 daily_tasks = []
+                for _ in range(k): daily_tasks.append(("Kasa", "morning", t_open, t_split)); daily_tasks.append(("Kasa", "evening", t_split, t_bar_end))
+                for _ in range(b1): daily_tasks.append(("Bar 1", "morning", t_open, t_split)); daily_tasks.append(("Bar 1", "evening", t_split, t_bar_end))
+                for _ in range(b2): daily_tasks.append(("Bar 2", "morning", t_open, t_split)); daily_tasks.append(("Bar 2", "evening", t_split, t_bar_end))
+                for _ in range(c): daily_tasks.append(("Cafe", "morning", t_open, t_split)); daily_tasks.append(("Cafe", "evening", t_split, t_bar_end))
+                for _ in range(om): daily_tasks.append(("Obsługa", "morning", t_open, t_split))
+                for _ in range(oe): daily_tasks.append(("Obsługa", "evening", t_split, t_obs_end))
                 
-                for _ in range(count_kasa): daily_tasks.append(("Kasa", "morning", t_open, t_split))
-                for _ in range(count_bar1): daily_tasks.append(("Bar 1", "morning", t_open, t_split))
-                for _ in range(count_bar2): daily_tasks.append(("Bar 2", "morning", t_open, t_split))
-                for _ in range(count_cafe): daily_tasks.append(("Cafe", "morning", t_open, t_split))
-                for _ in range(count_obs_morn): daily_tasks.append(("Obsługa", "morning", t_open, t_split))
-                
-                for _ in range(count_kasa): daily_tasks.append(("Kasa", "evening", t_split, t_bar_end))
-                for _ in range(count_bar1): daily_tasks.append(("Bar 1", "evening", t_split, t_bar_end))
-                for _ in range(count_bar2): daily_tasks.append(("Bar 2", "evening", t_split, t_bar_end))
-                for _ in range(count_cafe): daily_tasks.append(("Cafe", "evening", t_split, t_bar_end))
-                for _ in range(count_obs_even): daily_tasks.append(("Obsługa", "evening", t_split, t_obs_end))
-                
+                assigned_today = {'morning': [], 'evening': []}
                 for role, t_type, s, e in daily_tasks:
-                    worker = find_worker_for_shift(role, t_type, day, st.session_state.employees, st.session_state.avail_grid, assigned_today)
-                    final = worker if worker else "WAKAT"
+                    worker = find_worker_for_shift(role, t_type, current_date, st.session_state.employees, st.session_state.avail_grid, assigned_today)
+                    final = worker['Imie'] if worker is not None else "WAKAT"
                     st.session_state.shifts.loc[len(st.session_state.shifts)] = {
-                        "Data": day, "Stanowisko": role, "Godziny": f"{s}-{e}", "Pracownik_Imie": final, "Typ": "Auto"
+                        "Data": current_date, "Stanowisko": role, "Godziny": f"{s}-{e}", "Pracownik_Imie": final, "Typ": "Auto"
                     }
-                    if worker: 
-                        # --- NAPRAWA BŁĘDU ---
-                        # worker jest teraz napisem (string), bo tak zwraca go find_worker_for_shift
-                        # więc po prostu dodajemy go do listy
-                        assigned_today[t_type].append(worker)
+                    if worker is not None: assigned_today[t_type].append(final)
                     cnt += 1
             
-            st.success(f"Wygenerowano {cnt} zmian! Przejdź do zakładki 'Grafik (WIZUALNY)'.")
+            st.success(f"Wygenerowano {cnt} zmian! Przejdź do 'Grafik (WIZUALNY)'")
 
     # --- 2. DYSPOZYCJE ---
     elif menu == "Dyspozycje (Szybkie)":
         st.title("📥 Dyspozycje")
+        st.markdown(f"**GRAFIK NA OKRES: {st.session_state.get('last_week_start', 'Wybierz datę w generatorze')}**")
         today = datetime.now().date()
         d_start = st.date_input("Start tygodnia (Piątek):", today, min_value=today)
+        st.session_state['last_week_start'] = f"{d_start.strftime('%d.%m')} - {(d_start + timedelta(days=6)).strftime('%d.%m')}"
+        
         days = [d_start + timedelta(days=i) for i in range(7)]
         day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
         
@@ -391,16 +420,20 @@ if st.session_state.user_role == "manager":
     # --- 3. KADRY ---
     elif menu == "Kadry":
         st.title("📇 Kadry (A-Z)")
-        st.caption("Lista posortowana alfabetycznie po nazwisku.")
-        # Wyświetlamy ID jako numer porządkowy (Lp.)
-        display_df = st.session_state.employees[["ID", "Imie", "Role", "Plec"]].copy()
-        display_df = display_df.rename(columns={"ID": "Lp."})
+        display_df = st.session_state.employees[["ID", "Imie", "Role", "Plec"]].copy().rename(columns={"ID": "Lp."})
         st.dataframe(display_df, hide_index=True)
 
     # --- 4. GRAFIK (WIZUALNY) ---
     elif menu == "Grafik (WIZUALNY)":
         st.title("📋 Grafik Wizualny")
-        d_start = st.date_input("Pokaż tydzień od (Piątek):", datetime.now().date())
+        today = datetime.now().date()
+        # Automatycznie sugeruj najbliższy piątek
+        days_ahead = 4 - today.weekday()
+        if days_ahead <= 0: days_ahead += 7
+        next_friday = today + timedelta(days=days_ahead)
+        if today.weekday() == 4: next_friday = today
+        
+        d_start = st.date_input("Pokaż tydzień od (Piątek):", next_friday)
         d_end = d_start + timedelta(days=6)
         mask = (st.session_state.shifts['Data'] >= d_start) & (st.session_state.shifts['Data'] <= d_end)
         df_view = st.session_state.shifts.loc[mask]
