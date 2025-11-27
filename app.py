@@ -1,36 +1,44 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import numpy as np
 from fpdf import FPDF
-from datetime import datetime
+from datetime import datetime, time, timedelta
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | CFO EDITION", layout="wide")
+st.set_page_config(page_title="ETHER | TASKMASTER", layout="wide")
 
-# --- STYLE CSS (PRO MODE) ---
+# --- STYLE CSS ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #e0e0e0; }
     div[data-testid="stMetric"] { background-color: #1a1c24; border-left: 4px solid #d93025; padding: 15px; border-radius: 5px; }
-    .cost-box { border-left: 4px solid #f44336; } /* Czerwony dla kosztów */
-    .profit-box { border-left: 4px solid #4caf50; } /* Zielony dla zysku */
+    .hr-card { background-color: #1f2937; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 3px solid #3b82f6; }
+    .combo-role { border-left: 3px solid #f44336 !important; } /* Czerwony dla Hybrydy */
+    .task-role { border-left: 3px solid #4caf50 !important; } /* Zielony dla Plakatów */
     </style>
     """, unsafe_allow_html=True)
 
-# --- BAZA DANYCH (Symulowana) ---
-USERS = { "admin": "AlastorRules", "kino": "film123", "sklep": "buty2024", "demo": "demo" }
+# --- BAZA DANYCH ---
+USERS = {"admin": "AlastorRules", "kino": "film123", "demo": "demo"}
 
-# --- SŁOWNIK BRANŻOWY ---
-INDUSTRY_TERMS = {
-    "Uniwersalny": {"item": "Produkt", "value": "Wartość", "action": "Sprzedaż"},
-    "Kino / Teatr": {"item": "Film/Spektakl", "value": "Przychód", "action": "Seans"},
-    "Handel (Retail)": {"item": "Towar", "value": "Cena", "action": "Transakcja"},
-}
+# Definicje Stanowisk
+BASIC_ROLES = ["Obsługa", "Kasa", "Bar 1", "Bar 2", "Cafe"]
+SPECIAL_TASKS = ["Plakaty (Techniczne)", "Inwentaryzacja", "Sprzątanie Generalne"]
 
-# --- FUNKCJE ---
-def check_login(username, password):
-    return username in USERS and USERS[username] == password
+# --- PAMIĘĆ SESJI (HR) ---
+if 'employees' not in st.session_state:
+    st.session_state.employees = pd.DataFrame([
+        {"ID": 1, "Imie": "Anna Kowalska", "Role": ["Kasa", "Cafe"], "Start": time(8,0), "End": time(16,0)},
+        {"ID": 2, "Imie": "Tomek Nowak", "Role": ["Obsługa", "Bar 1", "Bar 2", "Plakaty (Techniczne)"], "Start": time(16,0), "End": time(23,0)},
+        {"ID": 3, "Imie": "Julia Manager", "Role": BASIC_ROLES + SPECIAL_TASKS, "Start": time(9,0), "End": time(22,0)},
+        {"ID": 4, "Imie": "Kamil Hybryda", "Role": ["Bar 1", "Cafe", "Bar 2"], "Start": time(12,0), "End": time(20,0)}
+    ])
+
+if 'shifts' not in st.session_state:
+    st.session_state.shifts = pd.DataFrame(columns=["Data", "Stanowisko", "Godziny", "Pracownik_ID", "Pracownik_Imie", "Typ"])
+
+# --- FUNKCJE POMOCNICZE ---
+def check_login(u, p): return u in USERS and USERS[u] == p
 
 def clean_text(text):
     if not isinstance(text, str): text = str(text)
@@ -38,35 +46,34 @@ def clean_text(text):
     for k, v in replacements.items(): text = text.replace(k, v)
     return text.encode('latin-1', 'ignore').decode('latin-1')
 
-def generate_invoice(company_name, items_df, total):
+def generate_schedule_pdf(df_shifts, date_str):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 20)
-    pdf.cell(0, 10, "FAKTURA VAT", ln=True, align='C')
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, clean_text(f"GRAFIK PRACY - KINO BAJKA ({date_str})"), ln=True, align='C')
     pdf.ln(10)
-    pdf.set_font("Arial", size=12)
-    pdf.cell(0, 10, f"Data: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
-    pdf.cell(0, 10, clean_text(f"Nabywca: {company_name}"), ln=True)
-    pdf.ln(10)
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(140, 10, "Nazwa", border=1)
-    pdf.cell(50, 10, clean_text("Wartość"), border=1)
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(50, 10, "Stanowisko/Zadanie", 1)
+    pdf.cell(40, 10, "Godziny", 1)
+    pdf.cell(60, 10, "Pracownik", 1)
     pdf.ln()
-    pdf.set_font("Arial", size=12)
-    for idx, row in items_df.iterrows():
-        name = clean_text(str(row.iloc[0]))[:40]
-        val = f"{row.iloc[1]:.2f}"
-        pdf.cell(140, 10, name, border=1)
-        pdf.cell(50, 10, val, border=1)
+    pdf.set_font("Arial", '', 10)
+    for _, row in df_shifts.iterrows():
+        pos = row['Stanowisko']
+        # Oznaczamy hybrydy w PDF gwiazdką
+        if "+" in pos: pos = f"[*] {pos}"
+        pdf.cell(50, 10, clean_text(pos), 1)
+        pdf.cell(40, 10, clean_text(row['Godziny']), 1)
+        pdf.cell(60, 10, clean_text(row['Pracownik_Imie']), 1)
         pdf.ln()
-    pdf.ln(5)
-    pdf.cell(0, 10, clean_text(f"SUMA: {total:,.2f} PLN"), ln=True, align='R')
     return pdf.output(dest='S').encode('latin-1')
 
-# --- INITIALIZACJA SESJI KOSZTÓW ---
-if 'expenses' not in st.session_state:
-    # Tworzymy pustą tabelę kosztów na start
-    st.session_state.expenses = pd.DataFrame(columns=["Nazwa", "Kategoria", "Kwota", "Data"])
+# --- LOGIKA HYBRYDOWA ---
+def can_employee_do_combo(employee_roles, combo_string):
+    """Sprawdza czy pracownik umie obie rzeczy z combo 'Bar 1 + Cafe'"""
+    parts = combo_string.split(" + ")
+    # Sprawdzamy czy pracownik ma WSZYSTKIE części składowe w swoich rolach
+    return all(part in employee_roles for part in parts)
 
 # ==========================================
 # LOGIN
@@ -83,7 +90,6 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.session_state.user = u
                 st.rerun()
-            else: st.error("Błąd.")
     st.stop()
 
 # ==========================================
@@ -91,113 +97,141 @@ if not st.session_state.logged_in:
 # ==========================================
 with st.sidebar:
     st.title(f"👤 {st.session_state.user.upper()}")
-    industry = st.selectbox("Branża:", list(INDUSTRY_TERMS.keys()))
-    terms = INDUSTRY_TERMS[industry]
-    st.divider()
-    uploaded_file = st.file_uploader(f"📥 1. Wgraj Przychody", type=['csv', 'xlsx'])
-    st.divider()
-    # Rozbudowane menu
-    page = st.radio("Moduł:", ["Pulpit Finansowy", "📉 Rejestr Kosztów", "Strategia", "Faktury"])
+    app_mode = st.radio("WYBIERZ SYSTEM:", ["📊 ANALITYKA", "👥 GRAFIK (HR)"])
+    if app_mode == "👥 GRAFIK (HR)":
+        page_hr = st.radio("Moduł HR:", ["1. Baza Pracowników", "2. Planowanie Zmian", "3. Widok Grafiku"])
     st.divider()
     if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
 
-# --- LOGIKA DANYCH ---
-df_income = None
-if uploaded_file:
-    try:
-        if uploaded_file.name.endswith('.csv'): df_income = pd.read_csv(uploaded_file)
-        else: df_income = pd.read_excel(uploaded_file)
-    except: st.error("Błąd pliku.")
-elif st.session_state.get('demo_mode'):
-    df_income = pd.DataFrame({'Produkt':['A','B'], 'Kwota':[1000,2000], 'Data':['2024-01-01','2024-01-02']})
-
-# --- EKRANY ---
-
-if page == "📉 Rejestr Kosztów":
-    st.title("Centrum Kosztów (Faktury Zakupowe)")
-    st.markdown('<div class="info-box">Dodaj tutaj faktury kosztowe, aby system mógł wyliczyć realny zysk firmy.</div>', unsafe_allow_html=True)
+# ==========================================
+# SYSTEM HR
+# ==========================================
+if app_mode == "👥 GRAFIK (HR)":
     
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        st.subheader("➕ Dodaj Fakturę")
-        with st.form("cost_form"):
-            ex_name = st.text_input("Nazwa (np. Prąd, Towar)")
-            ex_cat = st.selectbox("Kategoria", ["Zasoby/Towar", "Media/Prąd", "Pracownicy", "Marketing", "Inne"])
-            ex_val = st.number_input("Kwota Brutto (PLN)", min_value=0.0, step=10.0)
-            ex_date = st.date_input("Data Faktury")
-            
-            if st.form_submit_button("Zaksięguj Koszt"):
-                new_row = pd.DataFrame({"Nazwa": [ex_name], "Kategoria": [ex_cat], "Kwota": [ex_val], "Data": [ex_date]})
-                st.session_state.expenses = pd.concat([st.session_state.expenses, new_row], ignore_index=True)
-                st.success("Dodano!")
-                st.rerun()
+    # --- 1. BAZA PRACOWNIKÓW ---
+    if page_hr == "1. Baza Pracowników":
+        st.title("📇 Baza Kadr")
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            st.subheader("➕ Dodaj Osobę")
+            with st.form("add_employee"):
+                e_name = st.text_input("Imię i Nazwisko")
+                # Łączymy listy ról, żeby można było zaznaczyć też plakaty
+                e_roles = st.multiselect("Umiejętności:", BASIC_ROLES + SPECIAL_TASKS)
+                col_t1, col_t2 = st.columns(2)
+                e_start = col_t1.time_input("Od", time(8,0))
+                e_end = col_t2.time_input("Do", time(22,0))
+                if st.form_submit_button("Zapisz"):
+                    new_id = len(st.session_state.employees) + 1
+                    st.session_state.employees.loc[len(st.session_state.employees)] = {
+                        "ID": new_id, "Imie": e_name, "Role": e_roles, "Start": e_start, "End": e_end
+                    }
+                    st.success("Dodano!")
+                    st.rerun()
+        with c2:
+            st.subheader("Załoga")
+            st.dataframe(st.session_state.employees[["ID", "Imie", "Role", "Start", "End"]], use_container_width=True)
 
-    with col2:
-        st.subheader("📋 Lista Wydatków")
-        if not st.session_state.expenses.empty:
-            st.dataframe(st.session_state.expenses, use_container_width=True)
-            
-            # Wykres kołowy wydatków
-            fig = px.pie(st.session_state.expenses, values='Kwota', names='Kategoria', title="Gdzie uciekają pieniądze?", hole=0.4)
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Brak kosztów. Dodaj pierwszą fakturę po lewej.")
+    # --- 2. PLANOWANIE ZMIAN ---
+    elif page_hr == "2. Planowanie Zmian":
+        st.title("🗓️ Układanie Grafiku")
+        
+        # WYBÓR DATY
+        c_date, c_type = st.columns(2)
+        target_date = c_date.date_input("Dzień", datetime.now())
+        
+        # LOGIKA PLAKATÓW (Co 2 tygodnie w sobotę)
+        is_saturday = target_date.weekday() == 5
+        # Prosta symulacja parzystości tygodnia (numer tygodnia % 2)
+        week_num = target_date.isocalendar()[1]
+        is_poster_week = (week_num % 2 == 0) # Zakładamy, że w parzyste
+        
+        if is_saturday:
+            if is_poster_week:
+                st.info("ℹ️ To jest SOBOTA PLAKATOWA! Pamiętaj o zaplanowaniu osoby do plakatów.")
+            else:
+                st.caption("Sobota bez plakatów.")
 
-elif page == "Pulpit Finansowy":
-    st.title("Pulpit CFO (Zysk i Straty)")
-    
-    if df_income is not None:
-        # Konfiguracja kolumny przychodu
-        cols = df_income.columns.tolist()
-        col_val = cols[1] if len(cols)>1 else cols[0] # Automatyczny wybór (uproszczony)
+        # KONFIGURATOR ZMIANY
+        shift_type = c_type.selectbox("Rodzaj Zmiany:", ["Standardowa", "Hybryda (Combo)", "Zadanie Specjalne"])
         
-        # 1. PRZYCHODY
-        total_income = df_income[col_val].sum()
+        target_pos = None
         
-        # 2. KOSZTY
-        total_costs = st.session_state.expenses['Kwota'].sum() if not st.session_state.expenses.empty else 0
-        
-        # 3. ZYSK
-        net_profit = total_income - total_costs
-        
-        # WIZUALIZACJA KPI
-        k1, k2, k3 = st.columns(3)
-        k1.metric("💰 Przychody (Sprzedaż)", f"{total_income:,.2f} PLN")
-        k2.metric("💸 Koszty (Faktury)", f"{total_costs:,.2f} PLN", delta_color="inverse")
-        k3.metric("💎 Zysk Netto (Na rękę)", f"{net_profit:,.2f} PLN", delta=f"{(net_profit/total_income)*100:.1f}% Marży" if total_income>0 else "0%")
-        
+        if shift_type == "Standardowa":
+            target_pos = st.selectbox("Stanowisko", BASIC_ROLES)
+        elif shift_type == "Zadanie Specjalne":
+            target_pos = st.selectbox("Zadanie", SPECIAL_TASKS)
+        elif shift_type == "Hybryda (Combo)":
+            st.warning("⚠️ Hybryda wymaga pracownika z wieloma umiejętnościami.")
+            p1 = st.selectbox("Część 1", ["Bar 1", "Bar 2"])
+            p2 = st.selectbox("Część 2", ["Cafe", "Obsługa"])
+            target_pos = f"{p1} + {p2}"
+            st.write(f"Tworzysz stanowisko: **{target_pos}**")
+
         st.divider()
         
-        # Wykres Wodospadowy (Waterfall) - Profesjonalny wykres finansowy
-        st.subheader("Analiza Rentowności")
-        waterfall_data = pd.DataFrame({
-            "Typ": ["Przychód", "Koszty", "Zysk"],
-            "Kwota": [total_income, -total_costs, net_profit]
-        })
-        fig = px.bar(waterfall_data, x="Typ", y="Kwota", color="Kwota", title="Bilans Firmy", text_auto=True, color_continuous_scale="RdYlGn")
-        st.plotly_chart(fig, use_container_width=True)
+        c1, c2 = st.columns(2)
+        with c1:
+            s_start = st.time_input("Start", time(16,0))
+            s_end = st.time_input("Koniec", time(22,0))
+            needed = st.number_input("Ile osób?", 1, 5, 1)
         
-    else:
-        st.warning("Wgraj plik z Przychodami (Panel boczny), aby zobaczyć bilans.")
+        with c2:
+            st.subheader("Kandydaci")
+            
+            # FILTROWANIE INTELIGENTNE
+            candidates = pd.DataFrame()
+            
+            if shift_type == "Standardowa" or shift_type == "Zadanie Specjalne":
+                # Szukamy po prostu czy ma rolę na liście
+                candidates = st.session_state.employees[
+                    st.session_state.employees['Role'].apply(lambda x: target_pos in x)
+                ]
+            elif shift_type == "Hybryda (Combo)":
+                # Używamy naszej funkcji do sprawdzania obu części
+                candidates = st.session_state.employees[
+                    st.session_state.employees['Role'].apply(lambda roles: can_employee_do_combo(roles, target_pos))
+                ]
 
-elif page == "Strategia":
-    st.title("Strategia")
-    if df_income is not None:
-        cols = df_income.columns.tolist()
-        c_cat = cols[0]
-        c_val = cols[1] if len(cols)>1 else cols[0]
-        top = df_income.groupby(c_cat)[c_val].sum().reset_index().sort_values(by=c_val, ascending=False).head(10)
-        st.plotly_chart(px.bar(top, x=c_cat, y=c_val, title="Top Produkty"), use_container_width=True)
+            available = candidates['Imie'].tolist()
+            
+            if not available:
+                st.error("❌ Brak pracowników z takimi kwalifikacjami!")
+            else:
+                selected = st.multiselect(f"Dostępni ({len(available)}):", available, max_selections=needed)
+                if st.button("✅ PRZYDZIEL ZMIANĘ"):
+                    for worker in selected:
+                        w_id = candidates[candidates['Imie'] == worker].iloc[0]['ID']
+                        new_s = {
+                            "Data": target_date, "Stanowisko": target_pos,
+                            "Godziny": f"{s_start.strftime('%H:%M')}-{s_end.strftime('%H:%M')}",
+                            "Pracownik_ID": w_id, "Pracownik_Imie": worker, "Typ": shift_type
+                        }
+                        st.session_state.shifts.loc[len(st.session_state.shifts)] = new_s
+                    st.success("Zapisano!")
 
-elif page == "Faktury":
-    st.title("Generator Faktur Sprzedażowych")
-    if df_income is not None:
-        cols = df_income.columns.tolist()
-        c_cat = cols[0]
-        c_val = cols[1]
-        items = df_income.groupby(c_cat)[c_val].sum().reset_index().head(5)
-        st.dataframe(items)
-        if st.button("Wystaw PDF"):
-            pdf = generate_invoice("Klient", items, items[c_val].sum())
-            st.download_button("Pobierz", pdf, "faktura.pdf", "application/pdf")
+    # --- 3. WIDOK GRAFIKU ---
+    elif page_hr == "3. Widok Grafiku":
+        st.title("📋 Grafik")
+        v_date = st.date_input("Data:", datetime.now())
+        day_s = st.session_state.shifts[st.session_state.shifts['Data'] == v_date]
+        
+        if not day_s.empty:
+            # Kolorowanie wierszy (hack CSS w dataframe)
+            def highlight_rows(row):
+                if "Hybryda" in row['Typ']: return ['background-color: #3b1c1c'] * len(row) # Ciemna czerwień
+                if "Specjalne" in row['Typ']: return ['background-color: #1c3b2a'] * len(row) # Ciemna zieleń
+                return [''] * len(row)
+
+            st.dataframe(day_s[["Stanowisko", "Godziny", "Pracownik_Imie", "Typ"]].style.apply(highlight_rows, axis=1), use_container_width=True)
+            
+            if st.button("🖨️ PDF"):
+                pdf_bytes = generate_schedule_pdf(day_s, str(v_date))
+                st.download_button("Pobierz", pdf_bytes, "grafik.pdf", "application/pdf")
+        else:
+            st.info("Pusto.")
+
+# --- ANALITYKA ---
+elif app_mode == "📊 ANALITYKA":
+    st.title("Finanse")
+    st.info("Moduł finansowy z wersji v8.0")
