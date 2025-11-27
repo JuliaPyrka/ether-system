@@ -3,9 +3,10 @@ import pandas as pd
 from fpdf import FPDF
 from datetime import datetime, time, timedelta
 import random
+import re
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | AUTOPILOT", layout="wide")
+st.set_page_config(page_title="ETHER | SMART PARSER", layout="wide")
 
 # --- STYLE CSS ---
 st.markdown("""
@@ -13,8 +14,8 @@ st.markdown("""
     .stApp { background-color: #0e1117; color: #e0e0e0; }
     div[data-testid="stMetric"] { background-color: #1a1c24; border-left: 4px solid #d93025; padding: 15px; border-radius: 5px; }
     .auto-generated { border: 2px dashed #fbbf24; padding: 10px; border-radius: 5px; }
-    .success-slot { border-left: 5px solid #4caf50; padding-left: 10px; margin: 5px 0; }
-    .empty-slot { border-left: 5px solid #f44336; padding-left: 10px; margin: 5px 0; background-color: #2d1b1b; }
+    .success-slot { border-left: 5px solid #4caf50; padding-left: 10px; margin: 5px 0; background-color: #1e3a29; }
+    .empty-slot { border-left: 5px solid #f44336; padding-left: 10px; margin: 5px 0; background-color: #3a1e1e; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -59,36 +60,77 @@ def generate_schedule_pdf(df_shifts, title):
         pdf.cell(0, 8, clean_text(line), ln=True, border=1)
     return pdf.output(dest='S').encode('latin-1')
 
-# --- MAGIA AUTOPILOTA (PARSER DYSPOZYCJI) ---
+# --- KLUCZOWE: NOWY, MĄDRY PARSER DYSPOZYCJI ---
+def is_avail_compatible(avail_str, shift_type):
+    """
+    Analizuje napisy typu: "8-16", "8 - 16", "16-1", "8-1/NM", "16-1?"
+    Zwraca True, jeśli pracownik pasuje do zmiany.
+    """
+    if not avail_str or avail_str == "-" or len(avail_str) < 3:
+        return False
+
+    # 1. Normalizacja (usuwamy spacje, bierzemy część przed ukośnikiem)
+    clean = avail_str.replace(" ", "").split("/")[0] # np. "8 - 1/NM" -> "8-1"
+    
+    # 2. Próba rozbicia na Start i Koniec
+    try:
+        # Szukamy dwóch liczb rozdzielonych czymś (myślnikiem)
+        parts = re.split(r'[-–]', clean)
+        if len(parts) != 2: return False
+        
+        s = int(parts[0]) # Start
+        e = int(parts[1]) # End
+        
+        # 3. Logika dopasowania
+        if shift_type == 'morning':
+            # Zmiana ranna (np. 8:15 - 16:00)
+            # Pracownik musi zacząć rano (7-11) I kończyć po 15:00 LUB kończyć w nocy (<=4)
+            start_ok = (s >= 7 and s <= 12)
+            end_ok = (e >= 15 or e <= 4)
+            return start_ok and end_ok
+
+        elif shift_type == 'evening':
+            # Zmiana wieczorna (np. 16:00 - 00:15)
+            # Pracownik musi być dostępny o 16:00.
+            # Czyli start <= 16:00 ORAZ koniec w nocy (<=4) lub późno wieczorem (>=23)
+            # UWAGA: Ktoś z "8-1" też pasuje na wieczór!
+            
+            # Przypadek A: Zaczyna po południu (15, 16, 17)
+            starts_afternoon = (s >= 14 and s <= 18)
+            # Przypadek B: Zaczął rano ale siedzi do nocy (8-1)
+            starts_morning_stays_late = (s <= 12)
+            
+            ends_late = (e <= 4 or e >= 23)
+            
+            if starts_afternoon and ends_late: return True
+            if starts_morning_stays_late and ends_late: return True
+            return False
+            
+    except:
+        return False # Jeśli wpisał głupoty, ignorujemy
+    
+    return False
+
 def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, avail_grid):
-    """
-    shift_time_type: 'morning' (szukamy 8-16) lub 'evening' (szukamy 16-1)
-    """
     candidates = []
     
     for idx, emp in employees_df.iterrows():
-        # 1. Sprawdź czy ma rolę
+        # 1. Sprawdź rolę
         has_role = False
-        # Logika ról (Bar 1 -> Bar, itd.)
         check_role = role_needed.replace(" 1", "").replace(" 2", "")
         if check_role in emp['Role'] or check_role in emp['Auto']:
             has_role = True
             
         if has_role:
-            # 2. Sprawdź dyspozycyjność z GRIDU
+            # 2. Sprawdź dyspozycję (SMART)
             key = f"{emp['Imie']}_{date_obj.strftime('%Y-%m-%d')}"
             avail = avail_grid.get(key, "")
             
-            # Prosta logika dopasowania tekstu (Można rozbudować o AI)
-            if shift_time_type == 'morning':
-                if "8" in avail or "9" in avail or "rano" in avail.lower() or "16" in avail:
-                    candidates.append(emp['Imie'])
-            elif shift_time_type == 'evening':
-                if "16" in avail or "15" in avail or "noc" in avail.lower() or "1" in avail: # "16-1"
-                    candidates.append(emp['Imie'])
+            if is_avail_compatible(avail, shift_time_type):
+                candidates.append(emp['Imie'])
     
     if candidates:
-        return random.choice(candidates) # Bierzemy losowego pasującego
+        return random.choice(candidates)
     return None
 
 # --- PAMIĘĆ SESJI ---
@@ -98,9 +140,27 @@ if 'employees' not in st.session_state:
         {"Imie": "Kacper Borzechowski", "Role": ["Bar", "Obsługa", "Plakaty (Techniczne)"]},
         {"Imie": "Wiktor Buc", "Role": ["Obsługa"]},
         {"Imie": "Anna Dubińska", "Role": ["Bar", "Obsługa"]},
+        {"Imie": "Julia Fidor", "Role": ["Bar", "Obsługa"]},
         {"Imie": "Julia Głowacka", "Role": ["Cafe", "Bar", "Obsługa"]},
+        {"Imie": "Martyna Grela", "Role": ["Bar", "Obsługa"]},
+        {"Imie": "Weronika Jabłońska", "Role": ["Bar", "Obsługa"]},
+        {"Imie": "Jarosław Kaca", "Role": ["Bar", "Obsługa"]},
+        {"Imie": "Michał Kowalczyk", "Role": ["Obsługa"]},
+        {"Imie": "Dominik Mleczkowski", "Role": ["Cafe", "Bar", "Obsługa"]},
+        {"Imie": "Aleksandra Pacek", "Role": ["Cafe", "Bar", "Obsługa"]},
+        {"Imie": "Paweł Pod", "Role": ["Obsługa"]},
+        {"Imie": "Aleksander Prus", "Role": ["Obsługa"]},
+        {"Imie": "Julia Pyrka", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"]},
+        {"Imie": "Wiktoria Siara", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"]},
+        {"Imie": "Damian Siwak", "Role": ["Obsługa"]},
+        {"Imie": "Katarzyna Stanisławska", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"]},
+        {"Imie": "Patryk Szczodry", "Role": ["Obsługa"]},
+        {"Imie": "Anna Szymańska", "Role": ["Bar", "Obsługa"]},
         {"Imie": "Hubert War", "Role": ["Bar", "Obsługa", "Plakaty (Techniczne)"]},
-        {"Imie": "Weronika Jabłońska", "Role": ["Bar", "Obsługa"]}
+        {"Imie": "Marysia Wojtysiak", "Role": ["Cafe", "Bar", "Obsługa"]},
+        {"Imie": "Michał Wojtysiak", "Role": ["Obsługa"]},
+        {"Imie": "Weronika Ziętkowska", "Role": ["Cafe", "Bar", "Obsługa"]},
+        {"Imie": "Magda Żurowska", "Role": ["Bar", "Obsługa"]}
     ]
     rows = []
     for i, p in enumerate(data):
@@ -136,7 +196,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ==========================================
-# PANEL MENEDŻERA
+# MENEDŻER
 # ==========================================
 if st.session_state.user_role == "manager":
     with st.sidebar:
@@ -144,93 +204,66 @@ if st.session_state.user_role == "manager":
         menu = st.radio("Nawigacja:", ["Auto-Planer (Generator)", "Dyspozycje", "Kadry", "Grafik"])
         if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
 
-    # --- 1. AUTO-PLANER ---
+    # --- AUTO-PLANER ---
     if menu == "Auto-Planer (Generator)":
         st.title("🚀 Generator Dnia")
-        st.markdown("Wpisz godziny seansów, a system ułoży cały grafik.")
         
         c1, c2 = st.columns(2)
         with c1:
             target_date = st.date_input("Data planowania:", datetime.now())
-            # PARAMETRY KINA
             first_movie = st.time_input("Początek 1. filmu:", time(9,0))
             last_movie_start = st.time_input("Start Ostatniego filmu:", time(21,0))
             last_movie_end = st.time_input("Koniec Ostatniego filmu:", time(0,0))
             
         with c2:
-            st.info(f"**Logika Systemu:**")
-            # Obliczenia czasów
-            # 1. Start zmiany (Film - 45 min)
             dt_start = datetime.combine(datetime.today(), first_movie) - timedelta(minutes=45)
             t_open_str = dt_start.strftime("%H:%M")
-            
-            # 2. Koniec Bar/Cafe (Start Ostatniego + 15 min)
             dt_bar_end = datetime.combine(datetime.today(), last_movie_start) + timedelta(minutes=15)
             t_bar_end_str = dt_bar_end.strftime("%H:%M")
-            
-            # 3. Koniec Obsługi (Koniec Ostatniego + 15 min)
             dt_obs_end = datetime.combine(datetime.today(), last_movie_end) + timedelta(minutes=15)
             t_obs_end_str = dt_obs_end.strftime("%H:%M")
-            
-            # Punkt zmiany zmian (np. 16:00)
             t_split = "16:00"
             
-            st.write(f"🕒 Otwarcie (Start zmian rano): **{t_open_str}**")
-            st.write(f"🕒 Zamknięcie Baru/Kasy: **{t_bar_end_str}**")
-            st.write(f"🕒 Zamknięcie Obsługi: **{t_obs_end_str}**")
+            st.info(f"""
+            **Obliczone zmiany:**
+            🌞 RANO: {t_open_str} - 16:00
+            🌚 WIECZÓR BAR: 16:00 - {t_bar_end_str}
+            🌚 WIECZÓR OBSŁUGA: 16:00 - {t_obs_end_str}
+            """)
 
-        st.divider()
-        
-        if st.button("⚡ GENERUJ GRAFIK NA TEN DZIEŃ", type="primary"):
-            new_shifts = []
-            
-            # LISTA POTRZEBNYCH STANOWISK (Wzorzec)
-            # Format: (Stanowisko, Typ Czasu, Start, Koniec)
+        if st.button("⚡ GENERUJ GRAFIK", type="primary"):
             slots = [
-                # RANO
                 ("Kasa", "morning", t_open_str, t_split),
                 ("Bar 1", "morning", t_open_str, t_split),
                 ("Bar 2", "morning", t_open_str, t_split),
                 ("Cafe", "morning", t_open_str, t_split),
                 ("Obsługa", "morning", t_open_str, t_split),
-                ("Obsługa", "morning", t_open_str, t_split), # 2 osoby na obsłudze
+                ("Obsługa", "morning", t_open_str, t_split),
                 
-                # WIECZÓR
                 ("Kasa", "evening", t_split, t_bar_end_str),
                 ("Bar 1", "evening", t_split, t_bar_end_str),
                 ("Bar 2", "evening", t_split, t_bar_end_str),
                 ("Cafe", "evening", t_split, t_bar_end_str),
                 ("Obsługa", "evening", t_split, t_obs_end_str),
-                ("Obsługa", "evening", t_split, t_obs_end_str) # 2 osoby na obsłudze
+                ("Obsługa", "evening", t_split, t_obs_end_str)
             ]
             
-            st.write("### 🧩 Wynik Generowania:")
-            
+            st.write("### Wynik:")
             for role, time_type, s_time, e_time in slots:
-                # Szukamy pracownika
                 worker = find_worker_for_shift(role, time_type, target_date, st.session_state.employees, st.session_state.avail_grid)
-                
                 final_worker = worker if worker else "WAKAT (Brak chętnych)"
                 hours = f"{s_time}-{e_time}"
-                
-                # Dodajemy do bazy
                 st.session_state.shifts.loc[len(st.session_state.shifts)] = {
-                    "Data": target_date,
-                    "Stanowisko": role,
-                    "Godziny": hours,
-                    "Pracownik_Imie": final_worker,
-                    "Typ": "Auto"
+                    "Data": target_date, "Stanowisko": role, "Godziny": hours, "Pracownik_Imie": final_worker, "Typ": "Auto"
                 }
-                
-                # Wizualizacja wyniku
                 style = "success-slot" if worker else "empty-slot"
                 st.markdown(f"<div class='{style}'><b>{role}</b> ({hours}): {final_worker}</div>", unsafe_allow_html=True)
-            
-            st.success("Grafik wygenerowany! Przejdź do zakładki 'Grafik' aby zobaczyć całość.")
+            st.success("Gotowe!")
 
-    # --- 2. DYSPOZYCJE ---
+    # --- DYSPOZYCJE ---
     elif menu == "Dyspozycje":
-        st.title("📥 Dyspozycje (Grid)")
+        st.title("📥 Dyspozycje (Smart)")
+        st.info("System akceptuje formaty: 8-16, 8 - 16, 16-1, 16-1/NM")
         d_start = st.date_input("Początek tygodnia:", datetime(2025, 11, 14))
         days = [d_start + timedelta(days=i) for i in range(7)]
         day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
@@ -250,15 +283,15 @@ if st.session_state.user_role == "manager":
                     st.session_state.avail_grid[key] = new
             st.form_submit_button("Zapisz")
 
-    # --- 3. KADRY ---
+    # --- KADRY ---
     elif menu == "Kadry":
         st.title("📇 Kadry")
         st.dataframe(st.session_state.employees[["Imie", "Role"]])
 
-    # --- 4. GRAFIK ---
+    # --- GRAFIK ---
     elif menu == "Grafik":
         st.title("📋 Grafik")
-        d = st.date_input("Od", datetime.now())
+        d = st.date_input("Od", datetime(2025, 11, 14))
         mask = (st.session_state.shifts['Data'] >= d) & (st.session_state.shifts['Data'] <= d + timedelta(days=6))
         df = st.session_state.shifts.loc[mask]
         if not df.empty:
@@ -275,7 +308,6 @@ elif st.session_state.user_role == "worker":
         st.title(f"👋 {st.session_state.user_name}")
         menu = st.radio("Menu:", ["📅 Mój Grafik"])
         if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
-    
     if menu == "📅 Mój Grafik":
         st.title("Mój Grafik")
         my = st.session_state.shifts[st.session_state.shifts['Pracownik_Imie'] == st.session_state.user_name]
