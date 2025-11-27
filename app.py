@@ -343,7 +343,11 @@ if st.session_state.user_role == "manager":
                     st.session_state.shifts.loc[len(st.session_state.shifts)] = {
                         "Data": day, "Stanowisko": role, "Godziny": f"{s}-{e}", "Pracownik_Imie": final, "Typ": "Auto"
                     }
-                    if worker: assigned_today[t_type].append(worker['Imie'])
+                    if worker: 
+                        # --- NAPRAWA BŁĘDU ---
+                        # worker jest teraz napisem (string), bo tak zwraca go find_worker_for_shift
+                        # więc po prostu dodajemy go do listy
+                        assigned_today[t_type].append(worker)
                     cnt += 1
             
             st.success(f"Wygenerowano {cnt} zmian! Przejdź do zakładki 'Grafik (WIZUALNY)'.")
