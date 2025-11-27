@@ -4,57 +4,118 @@ from fpdf import FPDF
 from datetime import datetime, time, timedelta
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | DUAL CORE", layout="wide")
+st.set_page_config(page_title="ETHER | AUTOMATOR", layout="wide")
 
 # --- STYLE CSS ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #e0e0e0; }
     div[data-testid="stMetric"] { background-color: #1a1c24; border-left: 4px solid #d93025; padding: 15px; border-radius: 5px; }
-    .worker-card { border: 1px solid #3b82f6; padding: 10px; border-radius: 5px; margin: 5px 0; }
-    .manager-header { color: #fca5a5 !important; }
+    .worker-row { 
+        background-color: #1f2937; 
+        padding: 10px; 
+        border-radius: 5px; 
+        margin-bottom: 8px; 
+        border-left: 4px solid #3b82f6;
+    }
+    .auto-role { color: #86efac; font-size: 0.8em; font-style: italic; }
+    /* Ukrywanie indeksów tabeli */
+    thead tr th:first-child { display:none }
+    tbody th { display:none }
     </style>
     """, unsafe_allow_html=True)
 
-# --- BAZA UŻYTKOWNIKÓW (ROLA: manager / worker) ---
+# --- BAZA UŻYTKOWNIKÓW ---
 USERS = {
-    "admin":  {"pass": "AlastorRules", "role": "manager", "name": "Szef Wszystkich Szefów"},
-    "kierownik": {"pass": "film123", "role": "manager", "name": "Główny Kierownik"},
-    "ania":   {"pass": "ania1", "role": "worker", "name": "Anna Kowalska"},
-    "tomek":  {"pass": "tomek1", "role": "worker", "name": "Tomek Nowak"},
-    "julia":  {"pass": "julia1", "role": "worker", "name": "Bak Julia"} 
+    "admin":  {"pass": "AlastorRules", "role": "manager", "name": "Szef"},
+    "kierownik": {"pass": "film123", "role": "manager", "name": "Kierownik"},
+    "julia":  {"pass": "julia1", "role": "worker", "name": "Julia Bąk"},
 }
 
 # --- SŁOWNIKI ---
-BASIC_ROLES = ["Obsługa", "Kasa", "Bar 1", "Bar 2", "Cafe", "Pomoc Bar", "Pomoc Obsługa"]
-SPECIAL_TASKS = ["Plakaty (Techniczne)", "Inwentaryzacja", "Sprzątanie Generalne"]
-ALL_SKILLS = BASIC_ROLES + SPECIAL_TASKS
+# SKILLS_LIST: To co wybierasz przy pracowniku
+SKILLS_LIST = ["Bar", "Cafe", "Obsługa", "Kasa", "Plakaty (Techniczne)"]
+
+# SCHEDULE_POSITIONS: To co wybierasz w grafiku
+SCHEDULE_POSITIONS = ["Bar 1", "Bar 2", "Cafe", "Obsługa", "Kasa", "Plakaty", "Inwentaryzacja", "Pomoc Bar", "Pomoc Obsługa", "Sprzątanie Generalne"]
+
+# --- FUNKCJA LOGICZNA (AUTOMATYZACJA) ---
+def calculate_auto_roles(selected_roles):
+    """
+    Twoje zasady biznesowe:
+    1. Każdy -> Sprzątanie Generalne
+    2. Ma Bar -> Inwentaryzacja
+    3. Ma Bar ORAZ Obsługę -> Pomoc Bar, Pomoc Obsługa
+    """
+    auto = ["Sprzątanie Generalne"]
+    
+    has_bar = "Bar" in selected_roles
+    has_obs = "Obsługa" in selected_roles
+    
+    if has_bar:
+        auto.append("Inwentaryzacja")
+        
+    if has_bar and has_obs:
+        auto.append("Pomoc Bar")
+        auto.append("Pomoc Obsługa")
+        
+    return list(set(auto)) # Usuwamy duplikaty
 
 # --- PAMIĘĆ SESJI ---
 if 'employees' not in st.session_state:
-    st.session_state.employees = pd.DataFrame([
-        {"ID": 1, "Imie": "Anna Kowalska", "Role": ["Kasa", "Cafe"], "Start": time(8,0), "End": time(16,0)},
-        {"ID": 2, "Imie": "Tomek Nowak", "Role": ["Obsługa", "Bar 1", "Bar 2", "Plakaty (Techniczne)"], "Start": time(16,0), "End": time(23,0)},
-        {"ID": 3, "Imie": "Bak Julia", "Role": ["Bar 1", "Cafe"], "Start": time(15,0), "End": time(0,0)}
-    ])
+    # Baza wypełniona danymi z Twojego zdjęcia
+    data = [
+        {"Imie": "Julia Bąk", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"]},
+        {"Imie": "Kacper Borzechowski", "Role": ["Bar", "Obsługa", "Plakaty (Techniczne)"]},
+        {"Imie": "Wiktor Buc", "Role": ["Obsługa"]},
+        {"Imie": "Anna Dubińska", "Role": ["Bar", "Obsługa"]},
+        {"Imie": "Julia Fidor", "Role": ["Bar", "Obsługa"]},
+        {"Imie": "Julia Głowacka", "Role": ["Cafe", "Bar", "Obsługa"]},
+        {"Imie": "Martyna Grela", "Role": ["Bar", "Obsługa"]},
+        {"Imie": "Weronika Jabłońska", "Role": ["Bar", "Obsługa"]},
+        {"Imie": "Jarosław Kaca", "Role": ["Bar", "Obsługa"]},
+        {"Imie": "Michał Kowalczyk", "Role": ["Obsługa"]},
+        {"Imie": "Dominik Mleczkowski", "Role": ["Cafe", "Bar", "Obsługa"]},
+        {"Imie": "Aleksandra Pacek", "Role": ["Cafe", "Bar", "Obsługa"]},
+        {"Imie": "Paweł Pod", "Role": ["Obsługa"]},
+        {"Imie": "Aleksander Prus", "Role": ["Obsługa"]},
+        {"Imie": "Julia Pyrka", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"]},
+        {"Imie": "Wiktoria Siara", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"]},
+        {"Imie": "Damian Siwak", "Role": ["Obsługa"]},
+        {"Imie": "Katarzyna Stanisławska", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"]},
+        {"Imie": "Patryk Szczodry", "Role": ["Obsługa"]},
+        {"Imie": "Anna Szymańska", "Role": ["Bar", "Obsługa"]},
+        {"Imie": "Hubert War", "Role": ["Bar", "Obsługa", "Plakaty (Techniczne)"]},
+        {"Imie": "Marysia Wojtysiak", "Role": ["Cafe", "Bar", "Obsługa"]},
+        {"Imie": "Michał Wojtysiak", "Role": ["Obsługa"]},
+        {"Imie": "Weronika Ziętkowska", "Role": ["Cafe", "Bar", "Obsługa"]},
+        {"Imie": "Magda Żurowska", "Role": ["Bar", "Obsługa"]}
+    ]
+    
+    # Tworzymy DataFrame i obliczamy role automatyczne
+    rows = []
+    for i, person in enumerate(data):
+        rows.append({
+            "ID": i + 1,
+            "Imie": person["Imie"],
+            "Role": person["Role"],
+            "Auto": calculate_auto_roles(person["Role"]),
+            "Start": time(8,0),
+            "End": time(23,0)
+        })
+    st.session_state.employees = pd.DataFrame(rows)
 
 if 'shifts' not in st.session_state:
     st.session_state.shifts = pd.DataFrame([
-        {"Data": datetime.now().date(), "Stanowisko": "Kasa", "Godziny": "09:00-16:00", "Pracownik_Imie": "Anna Kowalska", "Typ": "Standardowa", "Status": "Zatwierdzone"},
-        {"Data": datetime.now().date(), "Stanowisko": "Obsługa", "Godziny": "16:00-23:00", "Pracownik_Imie": "Tomek Nowak", "Typ": "Standardowa", "Status": "Zatwierdzone"},
+        {"Data": datetime.now().date(), "Stanowisko": "Kasa", "Godziny": "09:00-16:00", "Pracownik_Imie": "Julia Pyrka", "Typ": "Standardowa"},
     ])
 
-# Nowość: Giełda Zamian i Dyspozycyjność
-if 'market' not in st.session_state:
-    st.session_state.market = pd.DataFrame(columns=["Data", "Stanowisko", "Godziny", "Kto_Oddaje", "Komentarz"])
+if 'market' not in st.session_state: st.session_state.market = pd.DataFrame(columns=["Data", "Stanowisko", "Godziny", "Kto_Oddaje", "Komentarz"])
+if 'availability' not in st.session_state: st.session_state.availability = pd.DataFrame(columns=["Pracownik", "Data_Od", "Data_Do", "Godziny_Pref"])
 
-if 'availability' not in st.session_state:
-    st.session_state.availability = pd.DataFrame(columns=["Pracownik", "Data_Od", "Data_Do", "Godziny_Pref"])
-
-# --- FUNKCJE ---
+# --- FUNKCJE POMOCNICZE ---
 def check_login(u, p):
-    if u in USERS and USERS[u]["pass"] == p:
-        return USERS[u]
+    if u in USERS and USERS[u]["pass"] == p: return USERS[u]
     return None
 
 def clean_text(text):
@@ -84,7 +145,6 @@ if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1,1,1])
     with col2:
         st.markdown("<h1 style='text-align: center; color: #d93025;'>ETHER SYSTEM</h1>", unsafe_allow_html=True)
-        st.info("Loginy testowe: 'admin' (szef), 'ania' (pracownik)")
         u = st.text_input("Login")
         p = st.text_input("Hasło", type="password")
         if st.button("ZALOGUJ"):
@@ -93,200 +153,177 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.session_state.user_role = user_data["role"]
                 st.session_state.user_name = user_data["name"]
-                st.session_state.user_login = u
                 st.rerun()
-            else:
-                st.error("Błędne dane.")
+            else: st.error("Błąd.")
     st.stop()
 
 # ==========================================
-# ROZDZIELENIE WIDOKÓW
+# WIDOK 1: PRACOWNIK
 # ==========================================
-
-# ------------------------------------------
-# WIDOK 1: PRACOWNIK (Worker)
-# ------------------------------------------
 if st.session_state.user_role == "worker":
     with st.sidebar:
-        st.title(f"👋 Cześć, {st.session_state.user_name.split()[0]}")
-        st.caption("Panel Pracownika")
-        st.divider()
+        st.title(f"👋 {st.session_state.user_name}")
         menu = st.radio("Menu:", ["📅 Mój Grafik", "🙋 Zgłoś Dyspozycyjność", "🔄 Giełda Zamian"])
-        st.divider()
         if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
 
     if menu == "📅 Mój Grafik":
         st.title("Mój Grafik")
-        # Filtrujemy zmiany TYLKO dla zalogowanego
         my_shifts = st.session_state.shifts[st.session_state.shifts['Pracownik_Imie'] == st.session_state.user_name]
-        
         if not my_shifts.empty:
             st.dataframe(my_shifts[["Data", "Stanowisko", "Godziny", "Typ"]], use_container_width=True)
-            
-            st.subheader("Oddaj zmianę")
-            shift_to_give = st.selectbox("Wybierz zmianę, której nie możesz wziąć:", my_shifts['Data'].astype(str) + " | " + my_shifts['Stanowisko'])
-            reason = st.text_input("Powód (opcjonalnie):", placeholder="np. wizyta u lekarza")
-            
-            if st.button("Wystaw na Giełdę Zamian"):
-                # Parsowanie wyboru
-                selected_data = shift_to_give.split(" | ")[0]
-                selected_pos = shift_to_give.split(" | ")[1]
-                selected_shift = my_shifts[(my_shifts['Data'].astype(str) == selected_data) & (my_shifts['Stanowisko'] == selected_pos)].iloc[0]
-                
-                # Dodanie do giełdy
+            shift_to_give = st.selectbox("Oddaj zmianę:", my_shifts['Data'].astype(str) + " | " + my_shifts['Stanowisko'])
+            if st.button("Wystaw na Giełdę"):
+                sel_d, sel_p = shift_to_give.split(" | ")
+                sel_s = my_shifts[(my_shifts['Data'].astype(str)==sel_d)&(my_shifts['Stanowisko']==sel_p)].iloc[0]
                 st.session_state.market.loc[len(st.session_state.market)] = {
-                    "Data": selected_shift['Data'],
-                    "Stanowisko": selected_shift['Stanowisko'],
-                    "Godziny": selected_shift['Godziny'],
-                    "Kto_Oddaje": st.session_state.user_name,
-                    "Komentarz": reason
+                    "Data": sel_s['Data'], "Stanowisko": sel_s['Stanowisko'], "Godziny": sel_s['Godziny'],
+                    "Kto_Oddaje": st.session_state.user_name, "Komentarz": "Prośba o zastępstwo"
                 }
-                st.success("Zmiana wystawiona! Czekaj aż ktoś ją weźmie.")
-        else:
-            st.info("Nie masz zaplanowanych zmian w najbliższym czasie.")
-
+                st.success("Wystawiono!")
+        else: st.info("Brak zmian.")
+    
     elif menu == "🙋 Zgłoś Dyspozycyjność":
-        st.title("Kiedy możesz pracować?")
-        with st.form("avail_form"):
-            d_start = st.date_input("Od dnia")
-            d_end = st.date_input("Do dnia")
-            pref_hours = st.text_input("Preferowane godziny (np. 'Po 16:00', 'Cały dzień')")
-            if st.form_submit_button("Wyślij do Kierownika"):
+        st.title("Dyspozycyjność")
+        with st.form("avail"):
+            d_start = st.date_input("Od")
+            d_end = st.date_input("Do")
+            pref = st.text_input("Preferencje (np. tylko rano)")
+            if st.form_submit_button("Wyślij"):
                 st.session_state.availability.loc[len(st.session_state.availability)] = {
-                    "Pracownik": st.session_state.user_name,
-                    "Data_Od": d_start, "Data_Do": d_end, "Godziny_Pref": pref_hours
+                    "Pracownik": st.session_state.user_name, "Data_Od": d_start, "Data_Do": d_end, "Godziny_Pref": pref
                 }
-                st.success("Zgłoszenie wysłane!")
+                st.success("Wysłano!")
 
     elif menu == "🔄 Giełda Zamian":
         st.title("Giełda Zamian")
-        st.markdown("Tutaj lądują zmiany, których inni nie mogą wziąć. **Kliknij 'Biorę', aby przejąć zmianę.**")
-        
         if not st.session_state.market.empty:
             for idx, row in st.session_state.market.iterrows():
-                # Nie pokazuj moich własnych zmian
                 if row['Kto_Oddaje'] != st.session_state.user_name:
-                    with st.container():
-                        c1, c2, c3 = st.columns([3, 1, 1])
-                        c1.warning(f"📅 {row['Data']} | {row['Stanowisko']} ({row['Godziny']})\nOd: {row['Kto_Oddaje']} ({row['Komentarz']})")
-                        if c3.button("🙋 BIORĘ TO", key=f"take_{idx}"):
-                            # 1. Dodaj zmianę nowemu pracownikowi w grafiku
-                            st.session_state.shifts.loc[len(st.session_state.shifts)] = {
-                                "Data": row['Data'], "Stanowisko": row['Stanowisko'],
-                                "Godziny": row['Godziny'], "Pracownik_Imie": st.session_state.user_name, # Nowy właściciel
-                                "Typ": "Przejęta", "Status": "Zatwierdzone"
-                            }
-                            # 2. Usuń zmianę staremu pracownikowi z grafiku
-                            # (To uproszczona logika - w prawdziwym DB usuwamy po ID)
-                            mask = (st.session_state.shifts['Data'] == row['Data']) & \
-                                   (st.session_state.shifts['Stanowisko'] == row['Stanowisko']) & \
-                                   (st.session_state.shifts['Pracownik_Imie'] == row['Kto_Oddaje'])
-                            st.session_state.shifts = st.session_state.shifts[~mask]
-                            
-                            # 3. Usuń z giełdy
-                            st.session_state.market = st.session_state.market.drop(idx)
-                            st.success("Przejęto zmianę! Grafik zaktualizowany.")
-                            st.rerun()
-        else:
-            st.info("Giełda jest pusta. Wszyscy pracują :)")
+                    c1, c2 = st.columns([3, 1])
+                    c1.warning(f"{row['Data']} | {row['Stanowisko']} ({row['Godziny']}) od {row['Kto_Oddaje']}")
+                    if c2.button("BIORĘ", key=f"take_{idx}"):
+                        st.session_state.shifts.loc[len(st.session_state.shifts)] = {
+                            "Data": row['Data'], "Stanowisko": row['Stanowisko'], "Godziny": row['Godziny'],
+                            "Pracownik_Imie": st.session_state.user_name, "Typ": "Przejęta"
+                        }
+                        mask = (st.session_state.shifts['Data']==row['Data'])&(st.session_state.shifts['Stanowisko']==row['Stanowisko'])&(st.session_state.shifts['Pracownik_Imie']==row['Kto_Oddaje'])
+                        st.session_state.shifts = st.session_state.shifts[~mask]
+                        st.session_state.market = st.session_state.market.drop(idx)
+                        st.rerun()
+        else: st.info("Pusto.")
 
-# ------------------------------------------
-# WIDOK 2: MENEDŻER (Manager)
-# ------------------------------------------
+# ==========================================
+# WIDOK 2: MENEDŻER
+# ==========================================
 elif st.session_state.user_role == "manager":
     with st.sidebar:
         st.title("🔧 PANEL KIEROWNIKA")
-        st.divider()
-        menu = st.radio("Zarządzanie:", ["Kadry (Dodaj/Usuń)", "Planowanie Grafiku", "Podgląd Grafiku", "Zgłoszenia Pracowników"])
-        st.divider()
+        menu = st.radio("Zarządzanie:", ["Kadry (Automator)", "Planowanie", "Podgląd Grafiku"])
         if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
 
-    if menu == "Kadry (Dodaj/Usuń)":
+    # --- 1. KADRY (AUTOMATOR) ---
+    if menu == "Kadry (Automator)":
         st.title("📇 Zarządzanie Kadrami")
-        c1, c2 = st.columns([1, 2])
         
-        with c1:
-            st.subheader("Edytor")
-            # Lista rozwijana do wyboru (z opcją Dodaj Nowego)
-            options = ["-- DODAJ NOWEGO --"] + st.session_state.employees['Imie'].tolist()
-            selected = st.selectbox("Wybierz osobę:", options)
-            
-            # Wypełnianie pól w zależności od wyboru
-            default_name = ""
-            default_roles = []
-            
-            if selected != "-- DODAJ NOWEGO --":
-                emp_data = st.session_state.employees[st.session_state.employees['Imie'] == selected].iloc[0]
-                default_name = emp_data['Imie']
-                default_roles = emp_data['Role']
-            
-            with st.form("hr_form"):
-                f_name = st.text_input("Imię i Nazwisko", value=default_name)
-                f_roles = st.multiselect("Uprawnienia", ALL_SKILLS, default=default_roles)
+        # Sekcja Dodawania
+        with st.expander("➕ ZATRUDNIJ PRACOWNIKA", expanded=False):
+            with st.form("new_hire"):
+                n_name = st.text_input("Imię i Nazwisko")
+                n_roles = st.multiselect("Główne Umiejętności (Wybierz tylko podstawowe):", SKILLS_LIST)
+                c1, c2 = st.columns(2)
+                n_start = c1.time_input("Start", time(8,0))
+                n_end = c2.time_input("Koniec", time(23,0))
                 
-                col_save, col_del = st.columns(2)
-                saved = col_save.form_submit_button("💾 ZAPISZ")
-                deleted = False
-                if selected != "-- DODAJ NOWEGO --":
-                    deleted = col_del.form_submit_button("🗑️ USUŃ", type="primary") # Ten guzik widać tylko przy edycji
-                
-                if saved:
-                    if selected == "-- DODAJ NOWEGO --":
-                        new_id = len(st.session_state.employees) + 10
-                        st.session_state.employees.loc[len(st.session_state.employees)] = {
-                            "ID": new_id, "Imie": f_name, "Role": f_roles, "Start": time(8,0), "End": time(22,0)
-                        }
-                        st.success("Dodano!")
-                    else:
-                        # Aktualizacja (uproszczona po imieniu)
-                        idx = st.session_state.employees[st.session_state.employees['Imie'] == selected].index[0]
-                        st.session_state.employees.at[idx, 'Imie'] = f_name
-                        st.session_state.employees.at[idx, 'Role'] = f_roles
-                        st.success("Zaktualizowano!")
-                    st.rerun()
-                
-                if deleted:
-                    idx = st.session_state.employees[st.session_state.employees['Imie'] == selected].index[0]
-                    st.session_state.employees = st.session_state.employees.drop(idx).reset_index(drop=True)
-                    st.warning("Pracownik usunięty.")
+                if st.form_submit_button("Zatrudnij"):
+                    auto_roles = calculate_auto_roles(n_roles) # Automatyka
+                    new_id = len(st.session_state.employees) + 1
+                    st.session_state.employees.loc[len(st.session_state.employees)] = {
+                        "ID": new_id, "Imie": n_name, "Role": n_roles, "Auto": auto_roles, "Start": n_start, "End": n_end
+                    }
+                    st.success(f"Dodano: {n_name}. Uprawnienia automatyczne przeliczone.")
                     st.rerun()
 
-        with c2:
-            st.subheader("Baza")
-            st.dataframe(st.session_state.employees[["Imie", "Role"]], use_container_width=True)
+        st.divider()
+        st.subheader("Obecny Skład")
+        
+        # LISTA Z PRZYCISKIEM USUWANIA
+        for index, row in st.session_state.employees.iterrows():
+            with st.container():
+                # Używamy kolumn do układu: Dane | Przycisk Usuń
+                c1, c2 = st.columns([5, 1])
+                
+                with c1:
+                    st.markdown(f"""
+                    <div class="worker-row">
+                        <div>
+                            <strong style="font-size:1.1em">{row['Imie']}</strong><br>
+                            <span style="color:#ddd">Role: {', '.join(row['Role'])}</span><br>
+                            <span class="auto-role">Auto: {', '.join(row['Auto'])}</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with c2:
+                    st.write("") # Odstęp
+                    if st.button("🗑️ USUŃ", key=f"del_{row['ID']}"):
+                        st.session_state.employees = st.session_state.employees[st.session_state.employees.ID != row['ID']].reset_index(drop=True)
+                        st.rerun()
 
-    elif menu == "Planowanie Grafiku":
+    # --- 2. PLANOWANIE ZMIAN ---
+    elif menu == "Planowanie":
         st.title("🗓️ Planer")
-        # --- Tu wklejamy logikę planowania z v11.0 ---
-        c_date, c_type = st.columns(2)
-        target_date = c_date.date_input("Dzień", datetime.now())
-        shift_type = c_type.selectbox("Typ:", ["Standard", "BAR + CAFE (Combo)", "Inwentaryzacja/Zadania"])
         
-        target_pos = None
-        if shift_type == "Standard": target_pos = st.selectbox("Stanowisko", BASIC_ROLES)
-        elif shift_type == "Inwentaryzacja/Zadania": target_pos = st.selectbox("Zadanie", SPECIAL_TASKS)
-        elif shift_type == "BAR + CAFE (Combo)": target_pos = "Bar 1 + Cafe"
+        c_date, c_pos = st.columns(2)
+        target_date = c_date.date_input("Dzień", datetime.now())
+        target_pos = c_pos.selectbox("Stanowisko do obsadzenia:", SCHEDULE_POSITIONS + ["Bar 1 + Cafe (Combo)"])
 
-        candidates = pd.DataFrame()
-        if shift_type == "BAR + CAFE (Combo)":
-            candidates = st.session_state.employees[st.session_state.employees['Role'].apply(lambda x: "Bar 1" in x and "Cafe" in x)]
-        else:
-            candidates = st.session_state.employees[st.session_state.employees['Role'].apply(lambda x: target_pos in x)]
+        # Sprawdzanie czy to Sobota Plakatowa
+        is_poster_saturday = (target_date.weekday() == 5) and (target_date.isocalendar()[1] % 2 == 0)
+        if is_poster_saturday: st.info("ℹ️ Sobota Plakatowa!")
 
-        with st.form("shift_maker"):
-            hours_str = st.text_input("Godziny", "16:00-22:00")
-            selected = st.multiselect("Wybierz pracowników:", candidates['Imie'].tolist())
-            if st.form_submit_button("Dodaj do Grafiku"):
+        with st.form("shift_form"):
+            hours = st.text_input("Godziny", "16:00-23:00")
+            needed = st.number_input("Ile osób?", 1, 5, 1)
+            
+            # LOGIKA FILTROWANIA KANDYDATÓW
+            candidates = pd.DataFrame()
+            
+            # 1. Bar 1 lub Bar 2 -> Szukamy skill "Bar"
+            if target_pos in ["Bar 1", "Bar 2"]:
+                candidates = st.session_state.employees[st.session_state.employees['Role'].apply(lambda x: "Bar" in x)]
+                
+            # 2. Combo
+            elif target_pos == "Bar 1 + Cafe (Combo)":
+                candidates = st.session_state.employees[st.session_state.employees['Role'].apply(lambda x: "Bar" in x and "Cafe" in x)]
+                
+            # 3. Pomoc / Inwentaryzacja -> Sprawdzamy role AUTOMATYCZNE
+            elif target_pos in ["Pomoc Bar", "Pomoc Obsługa", "Inwentaryzacja", "Sprzątanie Generalne"]:
+                 candidates = st.session_state.employees[st.session_state.employees['Auto'].apply(lambda x: target_pos in x)]
+            
+            # 4. Reszta (Cafe, Kasa, Obsługa, Plakaty) -> Szukamy w rolach głównych
+            else:
+                target_skill = target_pos.replace(" (Techniczne)", "")
+                candidates = st.session_state.employees[st.session_state.employees['Role'].apply(lambda x: target_skill in x)]
+
+            available_names = candidates['Imie'].tolist()
+            
+            if not available_names:
+                st.error("Brak pracowników z wymaganym uprawnieniem!")
+                selected = []
+            else:
+                selected = st.multiselect("Kandydaci:", available_names)
+
+            if st.form_submit_button("Zapisz w Grafiku"):
                 for worker in selected:
                     st.session_state.shifts.loc[len(st.session_state.shifts)] = {
-                        "Data": target_date, "Stanowisko": target_pos, "Godziny": hours_str,
-                        "Pracownik_Imie": worker, "Typ": shift_type, "Status": "Zatwierdzone"
+                        "Data": target_date, "Stanowisko": target_pos, "Godziny": hours,
+                        "Pracownik_Imie": worker, "Typ": "Standard", "Status": "Zatwierdzone"
                     }
-                st.success("Gotowe")
+                st.success("Dodano!")
 
+    # --- 3. WIDOK GRAFIKU (MATRIX) ---
     elif menu == "Podgląd Grafiku":
-        st.title("📋 Grafik Całościowy")
-        # Logika Matrix z v11.0
+        st.title("📋 Grafik Tygodniowy")
         d_start = st.date_input("Od dnia:", datetime.now())
         d_end = d_start + timedelta(days=6)
         mask = (st.session_state.shifts['Data'] >= d_start) & (st.session_state.shifts['Data'] <= d_end)
@@ -296,20 +333,8 @@ elif st.session_state.user_role == "manager":
             df_view['Info'] = df_view['Godziny'] + "\n" + df_view['Pracownik_Imie']
             matrix = df_view.pivot_table(index='Stanowisko', columns='Data', values='Info', aggfunc=lambda x: "\n---\n".join(x)).fillna("-")
             st.dataframe(matrix, use_container_width=True, height=600)
+            if st.button("PDF"):
+                pdf_bytes = generate_schedule_pdf(df_view, f"{d_start} - {d_end}")
+                st.download_button("Pobierz", pdf_bytes, "grafik.pdf", "application/pdf")
         else:
             st.info("Pusto.")
-
-    elif menu == "Zgłoszenia Pracowników":
-        st.title("📬 Skrzynka Odbiorcza")
-        
-        st.subheader("Dyspozycyjność (Kto kiedy chce pracować)")
-        if not st.session_state.availability.empty:
-            st.dataframe(st.session_state.availability, use_container_width=True)
-        else:
-            st.caption("Brak nowych zgłoszeń.")
-            
-        st.subheader("Aktywne Zamiany (Giełda)")
-        if not st.session_state.market.empty:
-            st.dataframe(st.session_state.market, use_container_width=True)
-        else:
-            st.caption("Nikt nie chce się zamieniać.")
