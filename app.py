@@ -6,23 +6,58 @@ import random
 import re
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | VISUAL MASTER", layout="wide")
+st.set_page_config(page_title="ETHER | FULL DEMO", layout="wide")
 
-# --- STYLE CSS (WIZUALIZACJA JAK W PDF) ---
+# --- STYLE CSS (TABELA WIZUALNA) ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #e0e0e0; }
     div[data-testid="stMetric"] { background-color: #1a1c24; border-left: 4px solid #d93025; padding: 15px; border-radius: 5px; }
     
-    /* STYL GRAFIKU (TABELA) */
-    .schedule-table { width: 100%; border-collapse: collapse; color: black; background-color: white; font-family: Arial, sans-serif; font-size: 12px; }
-    .schedule-table th { background-color: #333; color: white; padding: 10px; border: 1px solid #555; text-align: center; }
-    .schedule-table td { border: 1px solid #000; padding: 5px; vertical-align: top; text-align: center; height: 80px; width: 12.5%; }
-    .role-header { background-color: #ddd; font-weight: bold; text-align: center; padding: 5px; border: 1px solid #000; font-size: 14px; }
-    .shift-box { margin-bottom: 8px; border-bottom: 1px dotted #aaa; padding-bottom: 2px; }
-    .shift-time { font-weight: bold; font-size: 13px; display: block; color: #000; }
-    .shift-name { font-size: 11px; display: block; color: #333; text-transform: uppercase; }
-    .day-header { font-size: 14px; text-transform: uppercase; }
+    /* STYL GRAFIKU HTML */
+    .schedule-table { 
+        width: 100%; 
+        border-collapse: collapse; 
+        color: #000; 
+        background-color: #fff; 
+        font-family: Arial, sans-serif; 
+        font-size: 11px; 
+    }
+    .schedule-table th { 
+        background-color: #444; 
+        color: #fff; 
+        padding: 8px; 
+        border: 1px solid #777; 
+        text-align: center; 
+    }
+    .schedule-table td { 
+        border: 1px solid #ccc; 
+        padding: 4px; 
+        vertical-align: top; 
+        text-align: center; 
+        height: 60px; 
+        width: 12.5%; 
+    }
+    .role-header { 
+        background-color: #eee; 
+        font-weight: bold; 
+        text-align: center; 
+        vertical-align: middle !important;
+        border: 1px solid #999; 
+        font-size: 12px; 
+    }
+    .shift-box { 
+        background-color: #f9f9f9;
+        border: 1px solid #ddd;
+        border-radius: 3px;
+        margin-bottom: 3px; 
+        padding: 2px;
+    }
+    .shift-time { font-weight: bold; display: block; color: #000; font-size: 10px; }
+    .shift-name { display: block; color: #333; text-transform: uppercase; font-size: 9px; line-height: 1.1; }
+    .day-header { font-size: 12px; text-transform: uppercase; font-weight: bold; }
+    .success-slot { border-left: 5px solid #4caf50; padding-left: 10px; margin: 2px 0; background-color: #1e3a29; font-size: 0.9em; color: white; }
+    .empty-slot { border-left: 5px solid #f44336; padding-left: 10px; margin: 2px 0; background-color: #3a1e1e; font-size: 0.9em; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -51,56 +86,34 @@ def clean_text(text):
     for k, v in replacements.items(): text = text.replace(k, v)
     return text.encode('latin-1', 'ignore').decode('latin-1')
 
-# --- GENERATOR HTML (WIZUALIZACJA) ---
+# --- GENERATOR HTML (GRAFIK WIZUALNY) ---
 def render_html_schedule(df_shifts, start_date):
-    # Dni tygodnia PL
     pl_days = {0: "PONIEDZIAŁEK", 1: "WTOREK", 2: "ŚRODA", 3: "CZWARTEK", 4: "PIĄTEK", 5: "SOBOTA", 6: "NIEDZIELA"}
-    
-    # Generujemy listę 7 dni od start_date
     days = [start_date + timedelta(days=i) for i in range(7)]
     
-    html = '<table class="schedule-table">'
-    
-    # NAGŁÓWEK (DNI)
-    html += '<thead><tr><th style="width: 10%;">STANOWISKO</th>'
+    html = '<table class="schedule-table"><thead><tr><th style="width: 8%;">STANOWISKO</th>'
     for d in days:
         d_name = pl_days[d.weekday()]
         d_str = d.strftime('%d.%m')
         html += f'<th><div class="day-header">{d_name}<br>{d_str}</div></th>'
     html += '</tr></thead><tbody>'
     
-    # WIERSZE (STANOWISKA) - Kolejność jak w PDF
     visual_roles = ["Obsługa", "Kasa", "Bar 1", "Bar 2", "Cafe"]
     
     for role in visual_roles:
         html += f'<tr><td class="role-header">{role.upper()}</td>'
-        
         for d in days:
-            # Filtrujemy zmiany dla danego dnia i roli
-            # Uwaga: Bar 1 łapie też "Bar 1 + Cafe" (Combo)
             current_shifts = df_shifts[
                 (df_shifts['Data'] == d) & 
                 (df_shifts['Stanowisko'].str.contains(role, regex=False))
             ]
-            
             cell_content = ""
             if not current_shifts.empty:
                 for _, row in current_shifts.iterrows():
-                    # Formatowanie wyświetlania
-                    display_pos = ""
-                    if "+" in row['Stanowisko'] and role in row['Stanowisko']:
-                        display_pos = "(Combo)" # Oznaczenie dla combo
-                    
-                    cell_content += f'''
-                    <div class="shift-box">
-                        <span class="shift-time">{row['Godziny']}</span>
-                        <span class="shift-name">{row['Pracownik_Imie']} {display_pos}</span>
-                    </div>
-                    '''
-            
+                    display_pos = "(Combo)" if "+" in row['Stanowisko'] else ""
+                    cell_content += f'<div class="shift-box"><span class="shift-time">{row["Godziny"]}</span><span class="shift-name">{row["Pracownik_Imie"]} {display_pos}</span></div>'
             html += f'<td>{cell_content}</td>'
         html += '</tr>'
-        
     html += '</tbody></table>'
     return html
 
@@ -111,25 +124,36 @@ def generate_schedule_pdf(df_shifts, title):
     pdf.cell(0, 10, clean_text(title), ln=True, align='C')
     pdf.ln(10)
     pdf.set_font("Arial", '', 10)
-    for index, row in df_shifts.sort_values(by=["Data", "Stanowisko"]).iterrows():
-        line = f"{row['Data']} | {row['Stanowisko']} | {row['Godziny']} | {row['Pracownik_Imie']}"
-        pdf.cell(0, 8, clean_text(line), ln=True, border=1)
+    
+    days = sorted(df_shifts['Data'].unique())
+    for day in days:
+        d_str = day.strftime('%d.%m (%A)')
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, clean_text(f"--- {d_str} ---"), ln=True)
+        pdf.set_font("Arial", '', 10)
+        day_shifts = df_shifts[df_shifts['Data'] == day]
+        for _, row in day_shifts.sort_values(by=["Stanowisko"]).iterrows():
+            line = f"{row['Stanowisko']} | {row['Godziny']} | {row['Pracownik_Imie']}"
+            pdf.cell(0, 8, clean_text(line), ln=True, border=1)
+        pdf.ln(5)
     return pdf.output(dest='S').encode('latin-1')
 
 # --- PARSER DYSPOZYCJI ---
 def is_avail_compatible(avail_str, shift_type):
-    if not avail_str or avail_str == "-" or len(avail_str) < 3: return False, "Pusto"
+    if not avail_str or avail_str == "-" or len(avail_str) < 3: return False
     clean = avail_str.replace(" ", "").split("/")[0]
     try:
         parts = re.split(r'[-–]', clean)
-        if len(parts) != 2: return False, "Format"
+        if len(parts) != 2: return False
         s, e = int(parts[0]), int(parts[1])
         if shift_type == 'morning':
-            if (6 <= s <= 12) and (e >= 15 or e <= 4): return True, "Ok"
+            if (6 <= s <= 12) and (e >= 15 or e <= 4): return True
         elif shift_type == 'evening':
-            if (s <= 17) and (e <= 4 or e >= 22): return True, "Ok"
-    except: return False, "Błąd"
-    return False, "Nie pasuje"
+            is_start_ok = (s <= 17)
+            is_end_ok = (e <= 4 or e >= 22)
+            if is_start_ok and is_end_ok: return True
+    except: return False
+    return False
 
 def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, avail_grid):
     candidates = []
@@ -138,13 +162,41 @@ def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, 
         if check_role in emp['Role'] or check_role in emp['Auto']:
             key = f"{emp['Imie']}_{date_obj.strftime('%Y-%m-%d')}"
             avail = avail_grid.get(key, "")
-            ok, _ = is_avail_compatible(avail, shift_time_type)
-            if ok: candidates.append(emp['Imie'])
+            if is_avail_compatible(avail, shift_time_type):
+                candidates.append(emp['Imie'])
     if candidates: return random.choice(candidates)
     return None
 
+# --- WYPEŁNIANIE DANYMI (DEMO) ---
+def preload_demo_data(start_date):
+    """Wypełnia grafik dyspozycyjnością z Twojego zdjęcia dla wybranego tygodnia"""
+    # Mapa dyspozycyjności z Twojego zdjęcia (Uproszczona)
+    demo_avail = {
+        "Julia Bąk": ["16-1", "-", "8-1", "-", "16-1", "-", "16-1"], # Pt-Cz
+        "Kacper Borzechowski": ["-", "8-1", "8-1", "16-1", "8-1", "16-1", "16-1"],
+        "Wiktor Buc": ["8-1", "8-1", "-", "-", "-", "8-1", "-"],
+        "Anna Dubińska": ["-", "15-1", "16-1", "16-1", "8-1", "-", "16-1"],
+        "Julia Fidor": ["15-1", "8-1", "8-1", "-", "13-1", "8-11", "14-1"],
+        "Julia Głowacka": ["-", "8-1", "8-16", "15-1", "10-1", "18-1", "12-1"],
+        "Martyna Grela": ["-", "8-1", "8-1", "15-1", "12-1", "-", "15-1"],
+        "Weronika Jabłońska": ["8-16", "8-1", "8-1", "15-1", "15-1", "15-1", "-"],
+        "Dominik Mleczkowski": ["8-16", "16-1", "8-1", "16-1", "16-1", "-", "8-16"],
+        "Aleksandra Pacek": ["8-16", "8-1", "8-1", "-", "-", "16-1", "16-1"],
+        "Julia Pyrka": ["16-1", "8-1", "8-1", "-", "8-11", "8-1", "16-1"],
+        "Wiktoria Siara": ["8-16", "-", "8-16", "8-1", "-", "8-1", "8-1"],
+        "Hubert War": ["8-1", "8-1", "8-16", "8-1", "8-1", "8-1", "8-1"],
+        "Marysia Wojtysiak": ["8-16", "12-1", "8-1", "8-16", "-", "16-1", "8-1"],
+    }
+    
+    days = [start_date + timedelta(days=i) for i in range(7)]
+    for name, avails in demo_avail.items():
+        for i, val in enumerate(avails):
+            key = f"{name}_{days[i].strftime('%Y-%m-%d')}"
+            st.session_state.avail_grid[key] = val
+
 # --- PAMIĘĆ SESJI ---
 if 'employees' not in st.session_state:
+    # Pełna lista pracowników z rolami
     data = [
         {"Imie": "Julia Bąk", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"]},
         {"Imie": "Kacper Borzechowski", "Role": ["Bar", "Obsługa", "Plakaty (Techniczne)"]},
@@ -201,12 +253,12 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ==========================================
-# MENEDŻER
+# PANEL MENEDŻERA
 # ==========================================
 if st.session_state.user_role == "manager":
     with st.sidebar:
         st.title("🔧 PANEL KIEROWNIKA")
-        menu = st.radio("Nawigacja:", ["Auto-Planer (TYDZIEŃ)", "Dyspozycje (Szybkie)", "Kadry", "Grafik (WIZUALNY)"])
+        menu = st.radio("Nawigacja:", ["Auto-Planer (TYDZIEŃ)", "Dyspozycje", "Kadry", "Grafik (WIZUALNY)"])
         if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
 
     # --- 1. AUTO-PLANER ---
@@ -216,10 +268,9 @@ if st.session_state.user_role == "manager":
         c1, c2 = st.columns(2)
         with c1:
             today = datetime.now()
-            days_ahead = 4 - today.weekday()
-            if days_ahead <= 0: days_ahead += 7
-            next_friday = today + timedelta(days=days_ahead)
-            week_start = st.date_input("Start cyklu (Piątek):", next_friday)
+            # Ustawienie domyślne na 28.11.2025 (Twój PDF)
+            default_start = datetime(2025, 11, 28)
+            week_start = st.date_input("Start cyklu (Piątek):", default_start)
             
             st.markdown("### 🎬 Godziny Filmów")
             first_movie = st.time_input("Start 1. filmu:", time(9,0))
@@ -227,12 +278,15 @@ if st.session_state.user_role == "manager":
             last_movie_end = st.time_input("Koniec ostatniego:", time(0,0))
             
         with c2:
+            st.info("System wstępnie załadował dyspozycyjność z Twojego zdjęcia dla tego tygodnia!")
+            preload_demo_data(week_start) # <--- AUTOMATYCZNE ZAŁADOWANIE DANYCH!
+            
             dt_start = datetime.combine(datetime.today(), first_movie) - timedelta(minutes=45)
             t_open = dt_start.strftime("%H:%M")
             t_bar_end = (datetime.combine(datetime.today(), last_movie_start) + timedelta(minutes=15)).strftime("%H:%M")
             t_obs_end = (datetime.combine(datetime.today(), last_movie_end) + timedelta(minutes=15)).strftime("%H:%M")
             t_split = "16:00"
-            st.info(f"Otwarcie: {t_open} | Zamknięcie Bar: {t_bar_end} | Zamknięcie Obsługa: {t_obs_end}")
+            st.success(f"Zmiany: {t_open}-{t_split} / {t_split}-{t_bar_end} / {t_split}-{t_obs_end}")
 
         if st.button("⚡ GENERUJ CAŁY TYDZIEŃ", type="primary"):
             days_to_generate = [week_start + timedelta(days=i) for i in range(7)]
@@ -251,6 +305,9 @@ if st.session_state.user_role == "manager":
                 ("Obsługa", "evening", t_split, t_obs_end)
             ]
             cnt = 0
+            # Czyścimy stary grafik dla tych dni żeby nie dublować
+            # st.session_state.shifts = st.session_state.shifts[~st.session_state.shifts['Data'].isin(days_to_generate)]
+            
             for day in days_to_generate:
                 for role, t_type, s, e in slots_pattern:
                     worker = find_worker_for_shift(role, t_type, day, st.session_state.employees, st.session_state.avail_grid)
@@ -259,45 +316,29 @@ if st.session_state.user_role == "manager":
                         "Data": day, "Stanowisko": role, "Godziny": f"{s}-{e}", "Pracownik_Imie": final, "Typ": "Auto"
                     }
                     cnt += 1
-            st.success(f"Wygenerowano {cnt} zmian! Zobacz zakładkę 'Grafik (WIZUALNY)'.")
+            st.success(f"Wygenerowano grafik! Przejdź do zakładki 'Grafik (WIZUALNY)' aby zobaczyć efekt.")
 
     # --- 2. DYSPOZYCJE ---
-    elif menu == "Dyspozycje (Szybkie)":
-        st.title("📥 Dyspozycje")
-        d_start = st.date_input("Start tygodnia (Piątek):", datetime(2025, 11, 14))
+    elif menu == "Dyspozycje":
+        st.title("📥 Dyspozycje (Edytor)")
+        d_start = st.date_input("Start tygodnia (Piątek):", datetime(2025, 11, 28))
         days = [d_start + timedelta(days=i) for i in range(7)]
         day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
         
         with st.form("grid_form"):
-            cols = st.columns([3, 2, 1, 2, 2, 2, 2, 2, 2])
+            cols = st.columns([3] + [2]*7)
             cols[0].write("**Pracownik**")
-            cols[1].write(f"**Pt**")
-            cols[2].write(">>")
-            for i in range(1, 7): cols[i+2].write(f"**{day_names[i]}**")
+            for i, d in enumerate(days): cols[i+1].write(f"**{day_names[i]}**")
             
             for idx, emp in st.session_state.employees.iterrows():
-                r_cols = st.columns([3, 2, 1, 2, 2, 2, 2, 2, 2])
+                r_cols = st.columns([3] + [2]*7)
                 r_cols[0].write(f"👤 {emp['Imie']}")
-                
-                key_fri = f"{emp['Imie']}_{days[0].strftime('%Y-%m-%d')}"
-                val_fri = st.session_state.avail_grid.get(key_fri, "")
-                new_fri = r_cols[1].text_input("Pt", val_fri, key=key_fri, label_visibility="collapsed")
-                st.session_state.avail_grid[key_fri] = new_fri
-                
-                copy = r_cols[2].checkbox("Ty.", key=f"copy_{emp['ID']}")
-                
-                for i in range(1, 7):
-                    key = f"{emp['Imie']}_{days[i].strftime('%Y-%m-%d')}"
-                    if copy:
-                        st.session_state.avail_grid[key] = new_fri
-                        val = new_fri
-                        disabled = True
-                    else:
-                        val = st.session_state.avail_grid.get(key, "")
-                        disabled = False
-                    new_val = r_cols[i+2].text_input(day_names[i], val, key=key, label_visibility="collapsed", disabled=disabled)
-                    if not disabled: st.session_state.avail_grid[key] = new_val
-            st.form_submit_button("💾 ZAPISZ WSZYSTKO")
+                for i, d in enumerate(days):
+                    key = f"{emp['Imie']}_{d.strftime('%Y-%m-%d')}"
+                    val = st.session_state.avail_grid.get(key, "")
+                    new = r_cols[i+1].text_input("h", val, key=key, label_visibility="collapsed")
+                    st.session_state.avail_grid[key] = new
+            st.form_submit_button("Zapisz zmiany")
 
     # --- 3. KADRY ---
     elif menu == "Kadry":
@@ -307,25 +348,20 @@ if st.session_state.user_role == "manager":
     # --- 4. GRAFIK (WIZUALNY) ---
     elif menu == "Grafik (WIZUALNY)":
         st.title("📋 Grafik Wizualny")
-        
         d_start = st.date_input("Pokaż tydzień od (Piątek):", datetime(2025, 11, 28))
-        
-        # Filtrowanie danych do podglądu
         d_end = d_start + timedelta(days=6)
         mask = (st.session_state.shifts['Data'] >= d_start) & (st.session_state.shifts['Data'] <= d_end)
         df_view = st.session_state.shifts.loc[mask]
         
         if not df_view.empty:
-            # RENDEROWANIE HTML
             html_table = render_html_schedule(df_view, d_start)
             st.markdown(html_table, unsafe_allow_html=True)
-            
             st.write("---")
-            if st.button("🖨️ POBIERZ PDF (LISTA)"):
+            if st.button("🖨️ POBIERZ PDF"):
                 pdf_bytes = generate_schedule_pdf(df_view, f"GRAFIK: {d_start.strftime('%d.%m')} - {d_end.strftime('%d.%m')}")
                 st.download_button("Pobierz Plik", pdf_bytes, "grafik.pdf", "application/pdf")
         else:
-            st.info("Brak grafiku na ten tydzień. Użyj Auto-Planera.")
+            st.info("Brak grafiku. Użyj Auto-Planera.")
 
 elif st.session_state.user_role == "worker":
     st.info("Panel Pracownika")
