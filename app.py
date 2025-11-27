@@ -6,9 +6,9 @@ import random
 import re
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | CLEAN FIX", layout="wide")
+st.set_page_config(page_title="ETHER | UI REPAIR", layout="wide")
 
-# --- STYLE CSS ---
+# --- STYLE CSS (TYLKO NIEZBĘDNE) ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #e0e0e0; }
@@ -19,7 +19,7 @@ st.markdown("""
         background-color: #1a1c24;
         padding: 10px;
         border-radius: 10px;
-        margin-top: 20px;
+        margin-top: 10px;
     }
     .stTabs [data-baseweb="tab"] {
         background-color: #333;
@@ -32,24 +32,6 @@ st.markdown("""
         background-color: #3b82f6 !important;
         font-weight: bold;
         border: 1px solid #3b82f6;
-    }
-    
-    /* PANELE */
-    .config-box {
-        background-color: #262626;
-        padding: 20px;
-        border-radius: 10px;
-        border: 1px solid #444;
-        margin-top: 15px;
-    }
-    
-    /* GŁÓWNY WYBÓR TYGODNIA */
-    .week-selector {
-        background-color: #1a1c24;
-        padding: 15px;
-        border-radius: 10px;
-        border-left: 5px solid #d93025;
-        margin-bottom: 10px;
     }
     
     /* TABELA GRAFIKU */
@@ -295,14 +277,12 @@ if st.session_state.user_role == "manager":
         next_friday = today + timedelta(days=days_ahead)
         if today.weekday() == 4: next_friday = today
 
-        # GŁÓWNY WYBÓR DATY (BEZ DUCHÓW)
-        st.markdown(f"<div class='week-selector'>", unsafe_allow_html=True)
-        week_start = st.date_input("📅 Wybierz Tydzień (Start: Piątek)", next_friday, min_value=today)
-        
-        # Obliczenie końca tygodnia
-        week_end = week_start + timedelta(days=6)
-        st.markdown(f"**Planujesz grafik na okres:** {week_start.strftime('%d.%m.%Y')} (Pt) - {week_end.strftime('%d.%m.%Y')} (Cz)")
-        st.markdown("</div>", unsafe_allow_html=True)
+        # UŻYWAMY KONTENERA Z RAMKĄ (Fix Błędu UI)
+        with st.container(border=True):
+            st.markdown("### 1. Wybierz Tydzień")
+            week_start = st.date_input("Start cyklu (Tylko przyszłe Piątki):", next_friday, min_value=today)
+            week_end = week_start + timedelta(days=6)
+            st.info(f"📅 Planujesz grafik na okres: **{week_start.strftime('%d.%m')} (Pt) - {week_end.strftime('%d.%m')} (Cz)**")
         
         preload_demo_data(week_start)
         
@@ -314,24 +294,21 @@ if st.session_state.user_role == "manager":
         
         for i, tab in enumerate(tabs):
             with tab:
-                st.markdown(f"<div class='config-box'>", unsafe_allow_html=True)
-                
-                c_t1, c_t2, c_t3 = st.columns(3)
-                s1 = c_t1.time_input(f"1. Film", time(9,0), key=f"s1_{i}")
-                sl = c_t2.time_input(f"Start Ost.", time(21,0), key=f"sl_{i}")
-                el = c_t3.time_input(f"Koniec Ost.", time(0,0), key=f"el_{i}")
-                
-                st.write("---")
-                st.markdown("##### Obsada w tym dniu:")
-                c1, c2, c3, c4, c5, c6 = st.columns(6)
-                k = c1.selectbox("KASA", [0,1,2], index=1, key=f"k_{i}")
-                b1 = c2.selectbox("BAR 1", [0,1,2,3], index=1, key=f"b1_{i}")
-                b2 = c3.selectbox("BAR 2", [0,1,2], index=1, key=f"b2_{i}")
-                c = c4.selectbox("CAFE", [0,1,2], index=1, key=f"c_{i}")
-                om = c5.selectbox("OBS RANO", [1,2,3], index=1, key=f"om_{i}")
-                oe = c6.selectbox("OBS NOC", [1,2,3,4], index=2, key=f"oe_{i}")
-                
-                st.markdown("</div>", unsafe_allow_html=True)
+                with st.container(border=True):
+                    c_t1, c_t2, c_t3 = st.columns(3)
+                    s1 = c_t1.time_input(f"1. Film", time(9,0), key=f"s1_{i}")
+                    sl = c_t2.time_input(f"Start Ost.", time(21,0), key=f"sl_{i}")
+                    el = c_t3.time_input(f"Koniec Ost.", time(0,0), key=f"el_{i}")
+                    
+                    st.write("---")
+                    st.markdown("##### Obsada w tym dniu:")
+                    c1, c2, c3, c4, c5, c6 = st.columns(6)
+                    k = c1.selectbox("KASA", [0,1,2], index=1, key=f"k_{i}")
+                    b1 = c2.selectbox("BAR 1", [0,1,2,3], index=1, key=f"b1_{i}")
+                    b2 = c3.selectbox("BAR 2", [0,1,2], index=1, key=f"b2_{i}")
+                    c = c4.selectbox("CAFE", [0,1,2], index=1, key=f"c_{i}")
+                    om = c5.selectbox("OBS RANO", [1,2,3], index=1, key=f"om_{i}")
+                    oe = c6.selectbox("OBS NOC", [1,2,3,4], index=2, key=f"oe_{i}")
                 
                 week_config.append({
                     "date": week_days[i], "times": (s1, sl, el), "counts": (k, b1, b2, c, om, oe)
@@ -372,7 +349,7 @@ if st.session_state.user_role == "manager":
                     if worker is not None: assigned_today[t_type].append(worker['Imie'])
                     cnt += 1
             
-            st.success(f"Wygenerowano grafik! Przejdź do zakładki 'Grafik (WIZUALNY)'.")
+            st.success(f"Wygenerowano {cnt} zmian! Przejdź do zakładki 'Grafik (WIZUALNY)'.")
 
     # --- 2. DYSPOZYCJE ---
     elif menu == "Dyspozycje (Szybkie)":
