@@ -6,9 +6,9 @@ import random
 import re
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | UI REPAIR", layout="wide")
+st.set_page_config(page_title="ETHER | STABLE FIX", layout="wide")
 
-# --- STYLE CSS (TYLKO NIEZBĘDNE) ---
+# --- STYLE CSS ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #e0e0e0; }
@@ -44,6 +44,10 @@ st.markdown("""
     .shift-time { font-weight: bold; display: block; color: #000; font-size: 10px; }
     .shift-name { display: block; color: #333; text-transform: uppercase; font-size: 9px; line-height: 1.1; }
     .day-header { font-size: 12px; text-transform: uppercase; font-weight: bold; }
+    
+    /* PANELE */
+    .config-box { background-color: #262626; padding: 20px; border-radius: 10px; border: 1px solid #444; margin-top: 15px; }
+    .week-selector { background-color: #1a1c24; padding: 15px; border-radius: 10px; border-left: 5px solid #d93025; margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -90,6 +94,7 @@ def is_avail_compatible(avail_str, shift_type):
 def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, avail_grid, assigned_today):
     candidates = []
     for idx, emp in employees_df.iterrows():
+        # Conflict Guard (sprawdzamy czy imię już jest na liście zajętych)
         if emp['Imie'] in assigned_today[shift_time_type]: continue
         
         role_base = role_needed.replace(" 1", "").replace(" 2", "")
@@ -101,17 +106,19 @@ def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, 
 
     if not candidates: return None
 
-    final_candidate = None
+    final_candidate_name = None
+    
+    # Preferencje Płci
     if role_needed == "Obsługa":
         men = [c['Imie'] for c in candidates if c.get('Plec', 'K') == 'M']
-        if men: final_candidate = random.choice(men)
+        if men: final_candidate_name = random.choice(men)
         else:
             women = [c['Imie'] for c in candidates if c.get('Plec', 'M') == 'K']
-            if women: final_candidate = random.choice(women)
+            if women: final_candidate_name = random.choice(women)
     else:
-        final_candidate = random.choice([c['Imie'] for c in candidates])
+        final_candidate_name = random.choice([c['Imie'] for c in candidates])
         
-    return final_candidate
+    return final_candidate_name # ZWRACAMY STRING (IMIĘ), A NIE OBIEKT!
 
 # --- GENERATOR HTML ---
 def render_html_schedule(df_shifts, start_date):
@@ -277,7 +284,6 @@ if st.session_state.user_role == "manager":
         next_friday = today + timedelta(days=days_ahead)
         if today.weekday() == 4: next_friday = today
 
-        # UŻYWAMY KONTENERA Z RAMKĄ (Fix Błędu UI)
         with st.container(border=True):
             st.markdown("### 1. Wybierz Tydzień")
             week_start = st.date_input("Start cyklu (Tylko przyszłe Piątki):", next_friday, min_value=today)
@@ -341,12 +347,12 @@ if st.session_state.user_role == "manager":
                 
                 assigned_today = {'morning': [], 'evening': []}
                 for role, t_type, s, e in daily_tasks:
-                    worker = find_worker_for_shift(role, t_type, current_date, st.session_state.employees, st.session_state.avail_grid, assigned_today)
-                    final = worker['Imie'] if worker is not None else "WAKAT"
+                    worker_name = find_worker_for_shift(role, t_type, current_date, st.session_state.employees, st.session_state.avail_grid, assigned_today)
+                    final = worker_name if worker_name is not None else "WAKAT"
                     st.session_state.shifts.loc[len(st.session_state.shifts)] = {
                         "Data": current_date, "Stanowisko": role, "Godziny": f"{s}-{e}", "Pracownik_Imie": final, "Typ": "Auto"
                     }
-                    if worker is not None: assigned_today[t_type].append(worker['Imie'])
+                    if worker_name is not None: assigned_today[t_type].append(worker_name)
                     cnt += 1
             
             st.success(f"Wygenerowano {cnt} zmian! Przejdź do zakładki 'Grafik (WIZUALNY)'.")
