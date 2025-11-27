@@ -6,7 +6,7 @@ import random
 import re
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | FUTURE PROOF", layout="wide")
+st.set_page_config(page_title="ETHER | STABLE", layout="wide")
 
 # --- STYLE CSS (MODERN UI) ---
 st.markdown("""
@@ -248,21 +248,17 @@ if st.session_state.user_role == "manager":
     if menu == "Auto-Planer (LOGISTIC)":
         st.title("🚀 Generator Logistyczny")
         
-        # OBLICZANIE NAJBLIŻSZEGO PIĄTKU (BLOKADA WSTECZNA)
         today = datetime.now().date()
-        days_ahead = 4 - today.weekday() # 4 to piątek
+        days_ahead = 4 - today.weekday()
         if days_ahead <= 0: days_ahead += 7
         next_friday = today + timedelta(days=days_ahead)
-        
-        # Jeśli dzisiaj JEST piątek, pozwalamy wybrać dzisiaj
         if today.weekday() == 4: next_friday = today
 
         st.markdown(f"<div class='section-card'><div class='section-title'>1. Wybierz Tydzień</div>", unsafe_allow_html=True)
-        # Min_value blokuje daty wsteczne!
         week_start = st.date_input("Start cyklu (Tylko przyszłe Piątki):", next_friday, min_value=today)
         st.markdown("</div>", unsafe_allow_html=True)
         
-        preload_demo_data(week_start) # Ładowanie demo
+        preload_demo_data(week_start)
 
         col_time, col_staff = st.columns([1, 1])
         
@@ -275,16 +271,12 @@ if st.session_state.user_role == "manager":
             
         with col_staff:
             st.markdown("<div class='section-card'><div class='section-title'>3. Obsada (Ile osób?)</div>", unsafe_allow_html=True)
-            
-            # NOWY UI - Wybór liczby
             c1, c2 = st.columns(2)
             count_kasa = c1.selectbox("KASA", [0, 1, 2], index=1)
             count_cafe = c2.selectbox("CAFE", [0, 1, 2], index=1)
-            
             c3, c4 = st.columns(2)
             count_bar1 = c3.selectbox("BAR 1", [0, 1, 2, 3], index=1)
             count_bar2 = c4.selectbox("BAR 2", [0, 1, 2], index=1)
-            
             c5, c6 = st.columns(2)
             count_obs_morn = c5.selectbox("OBSŁUGA (Rano)", [1, 2, 3], index=0)
             count_obs_even = c6.selectbox("OBSŁUGA (Wieczór)", [1, 2, 3, 4], index=1)
@@ -292,8 +284,6 @@ if st.session_state.user_role == "manager":
 
         if st.button("⚡ GENERUJ CAŁY TYDZIEŃ", type="primary"):
             days_to_generate = [week_start + timedelta(days=i) for i in range(7)]
-            
-            # Czyścimy stare
             mask = (st.session_state.shifts['Data'] >= days_to_generate[0]) & (st.session_state.shifts['Data'] <= days_to_generate[-1])
             st.session_state.shifts = st.session_state.shifts[~mask]
             
@@ -308,14 +298,12 @@ if st.session_state.user_role == "manager":
                 assigned_today = {'morning': [], 'evening': []}
                 daily_tasks = []
                 
-                # RANO
                 for _ in range(count_kasa): daily_tasks.append(("Kasa", "morning", t_open, t_split))
                 for _ in range(count_bar1): daily_tasks.append(("Bar 1", "morning", t_open, t_split))
                 for _ in range(count_bar2): daily_tasks.append(("Bar 2", "morning", t_open, t_split))
                 for _ in range(count_cafe): daily_tasks.append(("Cafe", "morning", t_open, t_split))
                 for _ in range(count_obs_morn): daily_tasks.append(("Obsługa", "morning", t_open, t_split))
                 
-                # WIECZÓR
                 for _ in range(count_kasa): daily_tasks.append(("Kasa", "evening", t_split, t_bar_end))
                 for _ in range(count_bar1): daily_tasks.append(("Bar 1", "evening", t_split, t_bar_end))
                 for _ in range(count_bar2): daily_tasks.append(("Bar 2", "evening", t_split, t_bar_end))
@@ -328,7 +316,11 @@ if st.session_state.user_role == "manager":
                     st.session_state.shifts.loc[len(st.session_state.shifts)] = {
                         "Data": day, "Stanowisko": role, "Godziny": f"{s}-{e}", "Pracownik_Imie": final, "Typ": "Auto"
                     }
-                    if worker: assigned_today[t_type].append(worker['Imie'])
+                    if worker: 
+                        # --- NAPRAWA BŁĘDU ---
+                        # worker jest teraz napisem (string), bo tak zwraca go find_worker_for_shift
+                        # więc po prostu dodajemy go do listy
+                        assigned_today[t_type].append(worker)
                     cnt += 1
             
             st.success(f"Wygenerowano {cnt} zmian! Przejdź do zakładki 'Grafik (WIZUALNY)'.")
