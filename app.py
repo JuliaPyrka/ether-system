@@ -389,7 +389,7 @@ if st.session_state.user_role == "manager":
             for i in range(1, 7): cols[i+2].write(f"**{day_names[i]}**")
             
             for idx, emp in st.session_state.employees.iterrows():
-                r_cols = st.columns([3, 2, 1, 2, 2, 2, 2, 2, 2])
+                r_cols = st.columns([2, 2, 1, 2, 2, 2, 2, 2, 2])
                 r_cols[0].write(f"👤 {emp['Imie']}")
                 key_fri = f"{emp['Imie']}_{days[0].strftime('%Y-%m-%d')}"
                 val_fri = st.session_state.avail_grid.get(key_fri, "")
@@ -458,3 +458,4 @@ if st.session_state.user_role == "manager":
 
 elif st.session_state.user_role == "worker":
     st.info("Panel Pracownika")
+
