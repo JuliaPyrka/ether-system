@@ -6,7 +6,7 @@ import random
 import re
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | BUGFIX", layout="wide")
+st.set_page_config(page_title="ETHER | FULL SYSTEM", layout="wide")
 
 # --- STYLE CSS ---
 st.markdown("""
@@ -49,6 +49,7 @@ USERS = {
     "kierownik": {"pass": "film123", "role": "manager", "name": "Kierownik"},
     "julia":  {"pass": "julia1", "role": "worker", "name": "Julia Bąk"},
     "kacper": {"pass": "kacper1", "role": "worker", "name": "Kacper Borzechowski"},
+    "wiktor": {"pass": "wiktor1", "role": "worker", "name": "Wiktor Buc"},
 }
 
 # --- FUNKCJE LOGICZNE ---
@@ -69,26 +70,16 @@ def clean_text(text):
     for k, v in replacements.items(): text = text.replace(k, v)
     return text.encode('latin-1', 'ignore').decode('latin-1')
 
-# --- POPRAWIONA LOGIKA BLOKADY ---
 def is_availability_locked():
-    """
-    Blokada edycji:
-    - OTWARTY: Piątek(4), Sobota(5), Niedziela(6), Poniedziałek(0) do 23:00
-    - ZAMKNIĘTY: Poniedziałek po 23:00, Wtorek(1), Środa(2), Czwartek(3)
-    """
+    """Blokada edycji w Poniedziałek o 23:00"""
     now = datetime.now()
-    wd = now.weekday()
-    
-    # Dni robocze środka tygodnia (kiedy grafik się tworzy) - BLOKADA
-    if wd in [1, 2, 3]: # Wt, Śr, Czw
-        return True
-    
-    # Poniedziałek - BLOKADA PO 23:00
-    if wd == 0 and now.hour >= 23:
-        return True
-        
-    # Reszta (Pt, Sob, Nd, Pon rano) - OTWARTE
-    return False
+    # 0=Pon, 6=Nd
+    # Blokada: Wtorek(1), Środa(2), Czwartek(3)
+    if now.weekday() in [1, 2, 3]: return True
+    # Blokada: Poniedziałek(0) po 23:00
+    if now.weekday() == 0 and now.hour >= 23: return True
+    # Reszta (Pt, Sb, Nd, Pon rano) OTWARTA
+    return False 
 
 # --- PARSER DYSPOZYCJI ---
 def is_avail_compatible(avail_str, shift_type):
@@ -147,6 +138,7 @@ def render_html_schedule(df_shifts, start_date):
     """
     for d in days:
         w_day = d.weekday()
+        # Mapa nazw dni (weekday: 0=Pon... 4=Pt)
         day_map = {4:"PIĄTEK", 5:"SOBOTA", 6:"NIEDZIELA", 0:"PONIEDZIAŁEK", 1:"WTOREK", 2:"ŚRODA", 3:"CZWARTEK"}
         d_name = day_map[w_day]
         style = 'style="background-color: #2c5282;"' if w_day in [1, 5, 6] else ''
@@ -199,6 +191,22 @@ def preload_demo_data(start_date):
     demo_avail = {
         "Julia Bąk": ["16-1", "-", "8-1", "-", "16-1", "-", "16-1"], 
         "Kacper Borzechowski": ["-", "8-1", "8-1", "16-1", "8-1", "16-1", "16-1"],
+        "Wiktor Buc": ["8-1", "8-1", "-", "-", "-", "8-1", "-"],
+        "Anna Dubińska": ["-", "15-1", "16-1", "16-1", "8-1", "-", "16-1"],
+        "Julia Fidor": ["15-1", "8-1", "8-1", "-", "13-1", "8-11", "14-1"],
+        "Julia Głowacka": ["-", "8-1", "8-16", "15-1", "10-1", "18-1", "12-1"],
+        "Martyna Grela": ["-", "8-1", "8-1", "15-1", "12-1", "-", "15-1"],
+        "Weronika Jabłońska": ["8-16", "8-1", "8-1", "15-1", "15-1", "15-1", "-"],
+        "Dominik Mleczkowski": ["8-16", "16-1", "8-1", "16-1", "16-1", "-", "8-16"],
+        "Aleksandra Pacek": ["8-16", "8-1", "8-1", "-", "-", "16-1", "16-1"],
+        "Julia Pyrka": ["16-1", "8-1", "8-1", "-", "8-11", "8-1", "16-1"],
+        "Wiktoria Siara": ["8-16", "-", "8-16", "8-1", "-", "8-1", "8-1"],
+        "Hubert War": ["8-1", "8-1", "8-16", "8-1", "8-1", "8-1", "8-1"],
+        "Marysia Wojtysiak": ["8-16", "12-1", "8-1", "8-16", "-", "16-1", "8-1"],
+        "Paweł Pod": ["8-16", "8-1", "8-1", "-", "16-1", "-", "16-1"],
+        "Patryk Szczodry": ["-", "-", "-", "16-1", "16-1", "16-1", "16-1"],
+        "Damian Siwak": ["8-16", "-", "8-16", "8-16", "8-16", "8-16", "8-16"],
+        "Michał Kowalczyk": ["-", "-", "8-16", "8-16", "8-16", "-", "16-1"]
     }
     days = [start_date + timedelta(days=i) for i in range(7)]
     for name, avails in demo_avail.items():
@@ -298,10 +306,6 @@ if st.session_state.user_role == "worker":
         days_ahead = 4 - today.weekday()
         if days_ahead <= 0: days_ahead += 7
         next_friday = today + timedelta(days=days_ahead)
-        # Jeśli dziś sobota (5), next_friday to będzie następny piątek.
-        # Ale użytkownik chce wpisywać na NADCHODZĄCY tydzień.
-        # Skoro today=29.11 (Sob), to next_friday=05.12. Zgadza się.
-        
         days = [next_friday + timedelta(days=i) for i in range(7)]
         day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
         
@@ -311,11 +315,11 @@ if st.session_state.user_role == "worker":
                 cols[i].write(f"**{day_names[i]}** {d.strftime('%d.%m')}")
                 key = f"{st.session_state.user_name}_{d.strftime('%Y-%m-%d')}"
                 val = st.session_state.avail_grid.get(key, "")
-                # NAPRAWA: Przycisk disabled=True jeśli zablokowane
+                # Przycisk aktywny/nieaktywny
                 new_val = cols[i].text_input("h", val, key=f"w_{key}", disabled=is_locked, label_visibility="collapsed")
                 if not is_locked: st.session_state.avail_grid[key] = new_val
             
-            # NAPRAWA: Przycisk ZAWSZE widoczny, ale może być nieaktywny
+            # Przycisk widoczny zawsze, ale disabled
             st.form_submit_button("Zapisz", disabled=is_locked)
 
     # 3. KARTA CZASU (SMART)
