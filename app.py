@@ -6,7 +6,7 @@ import random
 import re
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | FULL SYSTEM", layout="wide")
+st.set_page_config(page_title="ETHER | BUGFIX", layout="wide")
 
 # --- STYLE CSS ---
 st.markdown("""
@@ -30,7 +30,7 @@ st.markdown("""
     .highlight-day { background-color: #e3f2fd !important; } 
     .role-header { background-color: #eee; font-weight: bold; text-align: center; vertical-align: middle !important; border: 1px solid #999; font-size: 12px; }
     
-    /* KAFELKI ZMIAN */
+    /* ZMIANY */
     .shift-box { background-color: #fff; border: 1px solid #aaa; border-radius: 3px; margin-bottom: 3px; padding: 2px; box-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
     .shift-time { font-weight: bold; display: block; color: #000; font-size: 10px; }
     .shift-name { display: block; color: #333; text-transform: uppercase; font-size: 9px; line-height: 1.1; }
@@ -69,12 +69,26 @@ def clean_text(text):
     for k, v in replacements.items(): text = text.replace(k, v)
     return text.encode('latin-1', 'ignore').decode('latin-1')
 
+# --- POPRAWIONA LOGIKA BLOKADY ---
 def is_availability_locked():
-    """Blokada edycji w Poniedziałek o 23:00"""
+    """
+    Blokada edycji:
+    - OTWARTY: Piątek(4), Sobota(5), Niedziela(6), Poniedziałek(0) do 23:00
+    - ZAMKNIĘTY: Poniedziałek po 23:00, Wtorek(1), Środa(2), Czwartek(3)
+    """
     now = datetime.now()
-    if now.weekday() == 0 and now.hour >= 23: return True
-    if now.weekday() > 0: return True 
-    return False 
+    wd = now.weekday()
+    
+    # Dni robocze środka tygodnia (kiedy grafik się tworzy) - BLOKADA
+    if wd in [1, 2, 3]: # Wt, Śr, Czw
+        return True
+    
+    # Poniedziałek - BLOKADA PO 23:00
+    if wd == 0 and now.hour >= 23:
+        return True
+        
+    # Reszta (Pt, Sob, Nd, Pon rano) - OTWARTE
+    return False
 
 # --- PARSER DYSPOZYCJI ---
 def is_avail_compatible(avail_str, shift_type):
@@ -133,7 +147,6 @@ def render_html_schedule(df_shifts, start_date):
     """
     for d in days:
         w_day = d.weekday()
-        # Mapa nazw dni
         day_map = {4:"PIĄTEK", 5:"SOBOTA", 6:"NIEDZIELA", 0:"PONIEDZIAŁEK", 1:"WTOREK", 2:"ŚRODA", 3:"CZWARTEK"}
         d_name = day_map[w_day]
         style = 'style="background-color: #2c5282;"' if w_day in [1, 5, 6] else ''
@@ -161,34 +174,24 @@ def render_html_schedule(df_shifts, start_date):
     return html
 
 def generate_schedule_pdf(df_shifts, title):
-    pdf = FPDF('L', 'mm', 'A4') # Landscape
+    pdf = FPDF('L', 'mm', 'A4')
     pdf.add_page()
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, clean_text(title), ln=True, align='C')
     pdf.ln(5)
     pdf.set_font("Arial", '', 8)
-    
     days = sorted(df_shifts['Data'].unique())
-    # Uproszczony wydruk listy
-    pdf.set_font("Arial", 'B', 10)
-    pdf.cell(30, 8, "DZIEN", 1)
-    pdf.cell(40, 8, "STANOWISKO", 1)
-    pdf.cell(40, 8, "GODZINY", 1)
-    pdf.cell(60, 8, "PRACOWNIK", 1)
-    pdf.ln()
-    
-    pdf.set_font("Arial", '', 9)
     for day in days:
-        d_str = day.strftime('%d.%m (%a)')
+        d_str = day.strftime('%d.%m (%A)')
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, clean_text(f"--- {d_str} ---"), ln=True)
+        pdf.set_font("Arial", '', 10)
         day_shifts = df_shifts[df_shifts['Data'] == day]
         for _, row in day_shifts.sort_values(by=["Stanowisko"]).iterrows():
-            name = row['Pracownik_Imie'] if row['Pracownik_Imie'] else "WAKAT"
-            pdf.cell(30, 8, d_str, 1)
-            pdf.cell(40, 8, clean_text(row['Stanowisko']), 1)
-            pdf.cell(40, 8, row['Godziny'], 1)
-            pdf.cell(60, 8, clean_text(name), 1)
-            pdf.ln()
-            
+            name = row['Pracownik_Imie'] if row['Pracownik_Imie'] else "---"
+            line = f"{row['Stanowisko']} | {row['Godziny']} | {name}"
+            pdf.cell(0, 8, clean_text(line), ln=True, border=1)
+        pdf.ln(5)
     return pdf.output(dest='S').encode('latin-1')
 
 # --- DATA SEEDING ---
@@ -196,7 +199,6 @@ def preload_demo_data(start_date):
     demo_avail = {
         "Julia Bąk": ["16-1", "-", "8-1", "-", "16-1", "-", "16-1"], 
         "Kacper Borzechowski": ["-", "8-1", "8-1", "16-1", "8-1", "16-1", "16-1"],
-        # ... Dane demo ...
     }
     days = [start_date + timedelta(days=i) for i in range(7)]
     for name, avails in demo_avail.items():
@@ -296,6 +298,10 @@ if st.session_state.user_role == "worker":
         days_ahead = 4 - today.weekday()
         if days_ahead <= 0: days_ahead += 7
         next_friday = today + timedelta(days=days_ahead)
+        # Jeśli dziś sobota (5), next_friday to będzie następny piątek.
+        # Ale użytkownik chce wpisywać na NADCHODZĄCY tydzień.
+        # Skoro today=29.11 (Sob), to next_friday=05.12. Zgadza się.
+        
         days = [next_friday + timedelta(days=i) for i in range(7)]
         day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
         
@@ -305,9 +311,12 @@ if st.session_state.user_role == "worker":
                 cols[i].write(f"**{day_names[i]}** {d.strftime('%d.%m')}")
                 key = f"{st.session_state.user_name}_{d.strftime('%Y-%m-%d')}"
                 val = st.session_state.avail_grid.get(key, "")
+                # NAPRAWA: Przycisk disabled=True jeśli zablokowane
                 new_val = cols[i].text_input("h", val, key=f"w_{key}", disabled=is_locked, label_visibility="collapsed")
                 if not is_locked: st.session_state.avail_grid[key] = new_val
-            if not is_locked: st.form_submit_button("Zapisz")
+            
+            # NAPRAWA: Przycisk ZAWSZE widoczny, ale może być nieaktywny
+            st.form_submit_button("Zapisz", disabled=is_locked)
 
     # 3. KARTA CZASU (SMART)
     elif menu == "⏱️ Karta Czasu Pracy":
@@ -318,14 +327,12 @@ if st.session_state.user_role == "worker":
         if my_shifts.empty:
             st.warning("Brak zmian w grafiku.")
         else:
-            # Lista zmian do wyboru
             shift_options = my_shifts.apply(lambda x: f"{x['Data']} | {x['Stanowisko']} ({x['Godziny']})", axis=1).tolist()
             
             with st.container():
                 st.markdown("<div class='timesheet-card'>", unsafe_allow_html=True)
                 selected_shift_str = st.selectbox("Wybierz zmianę:", shift_options)
                 
-                # Parsowanie
                 default_start = time(16,0)
                 default_end = time(0,0)
                 try:
@@ -381,6 +388,9 @@ elif st.session_state.user_role == "manager":
         with st.container(border=True):
             st.markdown("### 1. Wybierz Tydzień")
             week_start = st.date_input("Start cyklu (Tylko przyszłe Piątki):", next_friday, min_value=today)
+            if week_start.weekday() != 4:
+                st.error("⛔ BŁĄD: Grafiki w kinie muszą zaczynać się w PIĄTEK!")
+                st.stop()
             week_end = week_start + timedelta(days=6)
             st.info(f"📅 Planujesz grafik na okres: **{week_start.strftime('%d.%m')} (Pt) - {week_end.strftime('%d.%m')} (Cz)**")
         
