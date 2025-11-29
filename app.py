@@ -6,65 +6,40 @@ import random
 import re
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | MOBILE COMMANDER", layout="wide")
+st.set_page_config(page_title="ETHER | FULL SYSTEM", layout="wide")
 
-# --- STYLE CSS (MOBILE READY) ---
+# --- STYLE CSS ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #e0e0e0; }
     
-    /* KONTENER NA TELEFON (Przewijanie) */
-    .table-container {
-        overflow-x: auto;
-        white-space: nowrap;
-        border: 1px solid #444;
-        border-radius: 5px;
-        margin-bottom: 20px;
-    }
+    /* ZAKŁADKI */
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; background-color: #1a1c24; padding: 10px; border-radius: 10px; margin-top: 10px; }
+    .stTabs [data-baseweb="tab"] { background-color: #333; border-radius: 5px; color: white; padding: 5px 20px; border: 1px solid #555; }
+    .stTabs [aria-selected="true"] { background-color: #3b82f6 !important; font-weight: bold; border: 1px solid #3b82f6; }
+    
+    /* PANELE */
+    .config-box { background-color: #262626; padding: 20px; border-radius: 10px; border: 1px solid #444; margin-top: 15px; }
+    .week-selector { background-color: #1a1c24; padding: 15px; border-radius: 10px; border-left: 5px solid #d93025; margin-bottom: 10px; }
+    .timesheet-card { background-color: #1a1c24; padding: 20px; border-radius: 10px; border: 1px solid #444; border-left: 5px solid #4caf50; }
     
     /* TABELA GRAFIKU */
-    .schedule-table { width: 100%; border-collapse: collapse; color: #000; background-color: #fff; font-family: Arial, sans-serif; font-size: 10px; }
-    .schedule-table th { background-color: #333; color: #fff; padding: 5px; border: 1px solid #777; text-align: center; min-width: 80px; }
-    .schedule-table td { border: 1px solid #ccc; padding: 2px; vertical-align: top; text-align: center; height: 50px; width: 12.5%; }
-    
-    .role-header { background-color: #ddd; font-weight: bold; text-align: center; vertical-align: middle !important; border: 1px solid #999; font-size: 11px; width: 80px; }
-    
-    /* ZMIANY - WYGLĄD */
-    .shift-box { 
-        background-color: #f0f0f0; 
-        border: 1px solid #999; 
-        border-radius: 2px; 
-        margin-bottom: 2px; 
-        padding: 2px; 
-        font-size: 9px;
-    }
-    .shift-time { font-weight: bold; display: block; color: #000; }
-    .shift-name { display: block; color: #333; text-transform: uppercase; line-height: 1.1; }
-    .shift-type { display: block; color: #555; font-style: italic; font-size: 8px; }
-    
-    /* CZERWONE TŁO DLA WAKATU */
-    .wakat-box { 
-        background-color: #ffcccc !important; 
-        border: 1px solid #cc0000 !important; 
-        color: #cc0000;
-        font-weight: bold;
-    }
-    
-    /* NAGŁÓWKI DNI */
+    .schedule-table { width: 100%; border-collapse: collapse; color: #000; background-color: #fff; font-family: Arial, sans-serif; font-size: 11px; }
+    .schedule-table th { background-color: #444; color: #fff; padding: 8px; border: 1px solid #777; text-align: center; }
+    .schedule-table td { border: 1px solid #ccc; padding: 4px; vertical-align: top; text-align: center; height: 60px; width: 12.5%; }
     .highlight-day { background-color: #e3f2fd !important; } 
-    .day-header { font-size: 11px; text-transform: uppercase; font-weight: bold; }
+    .role-header { background-color: #eee; font-weight: bold; text-align: center; vertical-align: middle !important; border: 1px solid #999; font-size: 12px; }
     
-    /* STATUS BUDOWY */
-    .status-bar {
-        background-color: #2e3b55;
-        color: #fbbf24;
-        padding: 10px;
-        border-radius: 5px;
-        text-align: center;
-        font-weight: bold;
-        margin-bottom: 15px;
-        border: 1px solid #fbbf24;
-    }
+    /* KAFELKI ZMIAN */
+    .shift-box { background-color: #fff; border: 1px solid #aaa; border-radius: 3px; margin-bottom: 3px; padding: 2px; box-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
+    .shift-time { font-weight: bold; display: block; color: #000; font-size: 10px; }
+    .shift-name { display: block; color: #333; text-transform: uppercase; font-size: 9px; line-height: 1.1; }
+    
+    /* WAKATY */
+    .empty-shift-box { background-color: #ffcccc; border: 2px solid #ff0000; border-radius: 3px; margin-bottom: 3px; padding: 2px; min-height: 20px; }
+    .empty-time { font-weight: bold; display: block; color: #cc0000; font-size: 10px; }
+    
+    .day-header { font-size: 12px; text-transform: uppercase; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -73,6 +48,7 @@ USERS = {
     "admin":  {"pass": "AlastorRules", "role": "manager", "name": "Szef"},
     "kierownik": {"pass": "film123", "role": "manager", "name": "Kierownik"},
     "julia":  {"pass": "julia1", "role": "worker", "name": "Julia Bąk"},
+    "kacper": {"pass": "kacper1", "role": "worker", "name": "Kacper Borzechowski"},
 }
 
 # --- FUNKCJE LOGICZNE ---
@@ -93,6 +69,13 @@ def clean_text(text):
     for k, v in replacements.items(): text = text.replace(k, v)
     return text.encode('latin-1', 'ignore').decode('latin-1')
 
+def is_availability_locked():
+    """Blokada edycji w Poniedziałek o 23:00"""
+    now = datetime.now()
+    if now.weekday() == 0 and now.hour >= 23: return True
+    if now.weekday() > 0: return True 
+    return False 
+
 # --- PARSER DYSPOZYCJI ---
 def is_avail_compatible(avail_str, shift_type):
     if not avail_str or avail_str == "-" or len(avail_str) < 3: return False
@@ -111,6 +94,7 @@ def is_avail_compatible(avail_str, shift_type):
 def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, avail_grid, assigned_today):
     candidates = []
     for idx, emp in employees_df.iterrows():
+        # Conflict Guard
         if emp['Imie'] in assigned_today[shift_time_type]: continue
         
         role_base = role_needed.replace(" 1", "").replace(" 2", "")
@@ -122,42 +106,38 @@ def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, 
 
     if not candidates: return None
 
-    final_candidate = None
+    final_candidate_name = None
     if role_needed == "Obsługa":
         men = [c['Imie'] for c in candidates if c.get('Plec', 'K') == 'M']
-        if men: final_candidate = random.choice(men)
+        if men: final_candidate_name = random.choice(men)
         else:
             women = [c['Imie'] for c in candidates if c.get('Plec', 'M') == 'K']
-            if women: final_candidate = random.choice(women)
+            if women: final_candidate_name = random.choice(women)
     else:
-        final_candidate = random.choice([c['Imie'] for c in candidates])
-    return final_candidate
+        final_candidate_name = random.choice([c['Imie'] for c in candidates])
+        
+    return final_candidate_name
 
-# --- GENERATOR HTML (WIDOK MOBILNY) ---
+# --- HTML RENDER ---
 def render_html_schedule(df_shifts, start_date):
-    pl_days = {0: "PT", 1: "SB", 2: "ND", 3: "PN", 4: "WT", 5: "ŚR", 6: "CZ"}
+    pl_days = {0: "PIĄTEK", 1: "SOBOTA", 2: "NIEDZIELA", 3: "PONIEDZIAŁEK", 4: "WTOREK", 5: "ŚRODA", 6: "CZWARTEK"}
     days = [start_date + timedelta(days=i) for i in range(7)]
+    date_header_str = f"{start_date.strftime('%d.%m')} - {days[-1].strftime('%d.%m')}"
     
     html = f"""
-    <div class="table-container">
+    <div style="background-color: #333; color: white; padding: 10px; text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 0px; border-radius: 5px 5px 0 0;">
+        GRAFIK: {date_header_str}
+    </div>
     <table class="schedule-table">
-    <thead><tr><th style="width: 50px;">STANOWISKO</th>
+    <thead><tr><th style="width: 8%;">STANOWISKO</th>
     """
     for d in days:
-        w_day = d.weekday() # 4=Pt
-        # Mapowanie dni Python -> Nasz tydzień (Start Piątek)
-        # Weekday: 0=Pn, 4=Pt
-        day_label = ""
-        if w_day == 4: day_label = "PIĄTEK"
-        elif w_day == 5: day_label = "SOBOTA"
-        elif w_day == 6: day_label = "NIEDZIELA"
-        elif w_day == 0: day_label = "PONIEDZIAŁEK"
-        elif w_day == 1: day_label = "WTOREK"
-        elif w_day == 2: day_label = "ŚRODA"
-        elif w_day == 3: day_label = "CZWARTEK"
-        
+        w_day = d.weekday()
+        # Mapa nazw dni
+        day_map = {4:"PIĄTEK", 5:"SOBOTA", 6:"NIEDZIELA", 0:"PONIEDZIAŁEK", 1:"WTOREK", 2:"ŚRODA", 3:"CZWARTEK"}
+        d_name = day_map[w_day]
         style = 'style="background-color: #2c5282;"' if w_day in [1, 5, 6] else ''
-        html += f'<th {style}><div class="day-header">{day_label}<br>{d.strftime("%d.%m")}</div></th>'
+        html += f'<th {style}><div class="day-header">{d_name}<br>{d.strftime("%d.%m")}</div></th>'
     html += '</tr></thead><tbody>'
     
     visual_roles = ["Obsługa", "Kasa", "Bar 1", "Bar 2", "Cafe"]
@@ -170,69 +150,45 @@ def render_html_schedule(df_shifts, start_date):
             cell_content = ""
             for _, row in current_shifts.iterrows():
                 if row['Pracownik_Imie'] == "" or row['Pracownik_Imie'] == "WAKAT":
-                    # CZERWONE TŁO (Wymóg 5)
-                    cell_content += f'<div class="shift-box wakat-box"><span class="shift-time">{row["Godziny"]}</span><span class="shift-name">WAKAT</span></div>'
+                    cell_content += f'<div class="empty-shift-box"><span class="empty-time">{row["Godziny"]}</span></div>'
                 else:
-                    # OPCJA C (Wymóg 2): Imie + Czas + Typ
-                    typ = row.get('Typ', '')
-                    if typ == "Auto": typ = "" # Ukrywamy "Auto" bo to standard
-                    if "+" in row['Stanowisko']: typ = "COMBO"
-                    
-                    # Skrócone imię dla oszczędności miejsca
-                    parts = row['Pracownik_Imie'].split(" ")
-                    short = f"{parts[0]} {parts[-1][0]}." if len(parts)>1 else row['Pracownik_Imie']
-                    
-                    cell_content += f'''
-                    <div class="shift-box">
-                        <span class="shift-time">{row["Godziny"]}</span>
-                        <span class="shift-name">{short}</span>
-                        <span class="shift-type">{typ}</span>
-                    </div>
-                    '''
+                    display_pos = "(Combo)" if "+" in row['Stanowisko'] else ""
+                    short = row['Pracownik_Imie'].split(" ")[0] + " " + row['Pracownik_Imie'].split(" ")[-1][0] + "."
+                    cell_content += f'<div class="shift-box"><span class="shift-time">{row["Godziny"]}</span><span class="shift-name">{short} {display_pos}</span></div>'
             html += f'<td {td_class}>{cell_content}</td>'
         html += '</tr>'
-    html += '</tbody></table></div>'
+    html += '</tbody></table>'
     return html
 
 def generate_schedule_pdf(df_shifts, title):
-    pdf = FPDF('L', 'mm', 'A4') # LANDSCAPE A4 (Wymóg 10)
+    pdf = FPDF('L', 'mm', 'A4') # Landscape
     pdf.add_page()
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, clean_text(title), ln=True, align='C')
     pdf.ln(5)
     pdf.set_font("Arial", '', 8)
     
-    # Prosty wydruk listy (Matrix w PDF jest trudny bez zewn. bibliotek)
-    # Grupujemy po Dniach
     days = sorted(df_shifts['Data'].unique())
-    col_width = 38
-    
-    # Nagłówki
-    pdf.set_font("Arial", 'B', 8)
-    pdf.cell(20, 8, "Stanowisko", 1)
-    for d in days:
-        pdf.cell(col_width, 8, d.strftime('%d.%m'), 1, 0, 'C')
+    # Uproszczony wydruk listy
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(30, 8, "DZIEN", 1)
+    pdf.cell(40, 8, "STANOWISKO", 1)
+    pdf.cell(40, 8, "GODZINY", 1)
+    pdf.cell(60, 8, "PRACOWNIK", 1)
     pdf.ln()
     
-    visual_roles = ["Obsługa", "Kasa", "Bar 1", "Bar 2", "Cafe"]
-    pdf.set_font("Arial", '', 7)
-    
-    for role in visual_roles:
-        pdf.cell(20, 15, clean_text(role), 1)
-        for d in days:
-            shifts = df_shifts[(df_shifts['Data'] == d) & (df_shifts['Stanowisko'].str.contains(role, regex=False))]
-            content = ""
-            for _, s in shifts.iterrows():
-                name = s['Pracownik_Imie'] if s['Pracownik_Imie'] else "WAKAT"
-                if name == "WAKAT": name = "[!]"
-                content += f"{s['Godziny']} {clean_text(name)}\n"
+    pdf.set_font("Arial", '', 9)
+    for day in days:
+        d_str = day.strftime('%d.%m (%a)')
+        day_shifts = df_shifts[df_shifts['Data'] == day]
+        for _, row in day_shifts.sort_values(by=["Stanowisko"]).iterrows():
+            name = row['Pracownik_Imie'] if row['Pracownik_Imie'] else "WAKAT"
+            pdf.cell(30, 8, d_str, 1)
+            pdf.cell(40, 8, clean_text(row['Stanowisko']), 1)
+            pdf.cell(40, 8, row['Godziny'], 1)
+            pdf.cell(60, 8, clean_text(name), 1)
+            pdf.ln()
             
-            x = pdf.get_x()
-            y = pdf.get_y()
-            pdf.multi_cell(col_width, 15, content, 1, 'C')
-            pdf.set_xy(x + col_width, y) # Wróć do góry komórki
-        pdf.ln()
-        
     return pdf.output(dest='S').encode('latin-1')
 
 # --- DATA SEEDING ---
@@ -240,7 +196,7 @@ def preload_demo_data(start_date):
     demo_avail = {
         "Julia Bąk": ["16-1", "-", "8-1", "-", "16-1", "-", "16-1"], 
         "Kacper Borzechowski": ["-", "8-1", "8-1", "16-1", "8-1", "16-1", "16-1"],
-        # ... (możesz tu dodać resztę)
+        # ... Dane demo ...
     }
     days = [start_date + timedelta(days=i) for i in range(7)]
     for name, avails in demo_avail.items():
@@ -286,7 +242,7 @@ def reset_database():
 if 'employees' not in st.session_state or 'Plec' not in st.session_state.employees.columns: reset_database()
 if 'shifts' not in st.session_state: st.session_state.shifts = pd.DataFrame(columns=["Data", "Stanowisko", "Godziny", "Pracownik_Imie", "Typ"])
 if 'avail_grid' not in st.session_state: st.session_state.avail_grid = {}
-if 'start_time' not in st.session_state: st.session_state.start_time = datetime.now()
+if 'work_logs' not in st.session_state: st.session_state.work_logs = pd.DataFrame(columns=["Pracownik", "Data", "Start", "Koniec", "Godziny"])
 
 # ==========================================
 # LOGOWANIE
@@ -309,91 +265,112 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ==========================================
-# MENEDŻER
+# PRACOWNIK
 # ==========================================
-if st.session_state.user_role == "manager":
+if st.session_state.user_role == "worker":
     with st.sidebar:
-        st.title("🔧 PANEL KIEROWNIKA")
-        menu = st.radio("Nawigacja:", ["Grafik (WIZUALNY)", "Auto-Planer (LOGISTIC)", "Dyspozycje (Szybkie)", "Kadry"])
+        st.title(f"👋 {st.session_state.user_name}")
+        st.caption("Panel Pracownika")
+        menu = st.radio("Menu:", ["📅 Mój Grafik", "✍️ Moja Dyspozycyjność", "⏱️ Karta Czasu Pracy"])
+        st.divider()
         if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
 
-    # --- GRAFIK (WIDOK GŁÓWNY) ---
-    if menu == "Grafik (WIZUALNY)":
+    # 1. MÓJ GRAFIK
+    if menu == "📅 Mój Grafik":
+        st.title("Mój Grafik")
+        my_shifts = st.session_state.shifts[st.session_state.shifts['Pracownik_Imie'] == st.session_state.user_name]
         
-        # STATUS BUDOWY (Wymóg 6)
-        start_t = st.session_state.start_time.strftime("%H:%M")
-        st.markdown(f"<div class='status-bar'>🚧 PROCES BUDOWY GRAFIKU (Rozpoczęto: {start_t})</div>", unsafe_allow_html=True)
+        if not my_shifts.empty:
+            st.dataframe(my_shifts[["Data", "Stanowisko", "Godziny"]], use_container_width=True)
+        else:
+            st.info("Nie masz zmian w najbliższym grafiku.")
+
+    # 2. DYSPOZYCJE
+    elif menu == "✍️ Moja Dyspozycyjność":
+        st.title("Moja Dyspozycyjność")
+        is_locked = is_availability_locked()
+        if is_locked: st.error("🔒 Edycja zablokowana (po terminie).")
+        else: st.success("🔓 Edycja otwarta.")
         
         today = datetime.now().date()
         days_ahead = 4 - today.weekday()
         if days_ahead <= 0: days_ahead += 7
         next_friday = today + timedelta(days=days_ahead)
-        if today.weekday() == 4: next_friday = today
+        days = [next_friday + timedelta(days=i) for i in range(7)]
+        day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
         
-        d_start = st.date_input("Tydzień od (Piątek):", next_friday)
-        d_end = d_start + timedelta(days=6)
-        
-        # Filtrowanie
-        mask = (st.session_state.shifts['Data'] >= d_start) & (st.session_state.shifts['Data'] <= d_end)
-        df_view = st.session_state.shifts.loc[mask]
-        
-        # WIDOK
-        if not df_view.empty:
-            html_table = render_html_schedule(df_view, d_start)
-            st.markdown(html_table, unsafe_allow_html=True)
-            
-            st.write("---")
-            # PDF NA A4 POZIOMO (Wymóg 10)
-            if st.button("🖨️ POBIERZ PDF (A4 POZIOMO)"):
-                pdf_bytes = generate_schedule_pdf(df_view, f"GRAFIK: {d_start.strftime('%d.%m')} - {d_end.strftime('%d.%m')}")
-                st.download_button("Pobierz Plik", pdf_bytes, "grafik.pdf", "application/pdf")
-                
-            st.write("---")
-            
-            # SZYBKA KOREKTA (Wymóg 4)
-            st.subheader("🛠️ Szybka Korekta")
-            
-            # Tworzymy listę wszystkich zmian do wyboru
-            df_view['Label'] = df_view.apply(lambda x: f"{x['Data'].strftime('%a')} | {x['Stanowisko']} | {x['Pracownik_Imie'] or 'WAKAT'} ({x['Godziny']})", axis=1)
-            shift_list = df_view['Label'].tolist()
-            
-            c1, c2 = st.columns([3, 1])
-            selected_shift_str = c1.selectbox("Wybierz zmianę do poprawy:", shift_list)
-            
-            # Znajdź indeks wybranej zmiany w bazie
-            if selected_shift_str:
-                # To jest uproszczone wyszukiwanie po etykiecie
-                # W produkcji lepiej używać unikalnego ID zmiany
-                pass
-                
-            new_worker = c2.selectbox("Nowa osoba:", ["WAKAT"] + st.session_state.employees['Imie'].tolist())
-            
-            if st.button("Zapisz Zmianę"):
-                # Znajdź wiersz w df_view który pasuje do labela
-                row_to_edit = df_view[df_view['Label'] == selected_shift_str].iloc[0]
-                
-                # Znajdź ten wiersz w głównej bazie (st.session_state.shifts)
-                # Używamy kryteriów: Data, Stanowisko, Godziny (zakładamy że są unikalne dla slotu)
-                idx = st.session_state.shifts[
-                    (st.session_state.shifts['Data'] == row_to_edit['Data']) &
-                    (st.session_state.shifts['Stanowisko'] == row_to_edit['Stanowisko']) &
-                    (st.session_state.shifts['Godziny'] == row_to_edit['Godziny'])
-                ].index
-                
-                if not idx.empty:
-                    final_name = "" if new_worker == "WAKAT" else new_worker
-                    st.session_state.shifts.at[idx[0], 'Pracownik_Imie'] = final_name
-                    st.success("Zmieniono!")
-                    st.rerun()
-                else:
-                    st.error("Nie znaleziono zmiany w bazie.")
+        with st.form("worker_avail"):
+            cols = st.columns(7)
+            for i, d in enumerate(days):
+                cols[i].write(f"**{day_names[i]}** {d.strftime('%d.%m')}")
+                key = f"{st.session_state.user_name}_{d.strftime('%Y-%m-%d')}"
+                val = st.session_state.avail_grid.get(key, "")
+                new_val = cols[i].text_input("h", val, key=f"w_{key}", disabled=is_locked, label_visibility="collapsed")
+                if not is_locked: st.session_state.avail_grid[key] = new_val
+            if not is_locked: st.form_submit_button("Zapisz")
 
+    # 3. KARTA CZASU (SMART)
+    elif menu == "⏱️ Karta Czasu Pracy":
+        st.title("Ewidencja")
+        
+        my_shifts = st.session_state.shifts[st.session_state.shifts['Pracownik_Imie'] == st.session_state.user_name]
+        
+        if my_shifts.empty:
+            st.warning("Brak zmian w grafiku.")
         else:
-            st.info("Brak grafiku. Użyj Auto-Planera.")
+            # Lista zmian do wyboru
+            shift_options = my_shifts.apply(lambda x: f"{x['Data']} | {x['Stanowisko']} ({x['Godziny']})", axis=1).tolist()
+            
+            with st.container():
+                st.markdown("<div class='timesheet-card'>", unsafe_allow_html=True)
+                selected_shift_str = st.selectbox("Wybierz zmianę:", shift_options)
+                
+                # Parsowanie
+                default_start = time(16,0)
+                default_end = time(0,0)
+                try:
+                    h_part = selected_shift_str.split("(")[1].replace(")", "")
+                    s, e = h_part.split("-")
+                    default_start = datetime.strptime(s, "%H:%M").time()
+                    default_end = datetime.strptime(e, "%H:%M").time()
+                except: pass
+                
+                c1, c2, c3 = st.columns(3)
+                shift_date = selected_shift_str.split(" | ")[0]
+                c1.text_input("Data", value=shift_date, disabled=True)
+                log_start = c2.time_input("Start", value=default_start)
+                log_end = c3.time_input("Koniec", value=default_end)
+                
+                if st.button("➕ ZATWIERDŹ"):
+                    l_date = datetime.strptime(shift_date, "%Y-%m-%d").date()
+                    dt1 = datetime.combine(l_date, log_start)
+                    dt2 = datetime.combine(l_date, log_end)
+                    if dt2 < dt1: dt2 += timedelta(days=1)
+                    hours = (dt2 - dt1).total_seconds() / 3600
+                    st.session_state.work_logs.loc[len(st.session_state.work_logs)] = {
+                        "Pracownik": st.session_state.user_name, "Data": l_date, "Start": log_start, "Koniec": log_end, "Godziny": round(hours, 2)
+                    }
+                    st.success(f"Dodano: {hours:.2f}h")
+                st.markdown("</div>", unsafe_allow_html=True)
+            
+            st.divider()
+            my_logs = st.session_state.work_logs[st.session_state.work_logs['Pracownik'] == st.session_state.user_name]
+            if not my_logs.empty:
+                st.metric("Suma Godzin", f"{my_logs['Godziny'].sum():.2f} h")
+                st.dataframe(my_logs, use_container_width=True)
 
-    # --- AUTO-PLANER (LOGISTIC) ---
-    elif menu == "Auto-Planer (LOGISTIC)":
-        st.title("🚀 Generator")
+# ==========================================
+# MENEDŻER
+# ==========================================
+elif st.session_state.user_role == "manager":
+    with st.sidebar:
+        st.title("🔧 PANEL KIEROWNIKA")
+        menu = st.radio("Nawigacja:", ["Auto-Planer (LOGISTIC)", "Dyspozycje (Szybkie)", "Kadry", "Grafik (WIZUALNY)"])
+        if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
+
+    # --- 1. AUTO-PLANER (LOGISTIC) ---
+    if menu == "Auto-Planer (LOGISTIC)":
+        st.title("🚀 Generator Logistyczny")
         
         today = datetime.now().date()
         days_ahead = 4 - today.weekday()
@@ -402,12 +379,10 @@ if st.session_state.user_role == "manager":
         if today.weekday() == 4: next_friday = today
 
         with st.container(border=True):
+            st.markdown("### 1. Wybierz Tydzień")
             week_start = st.date_input("Start cyklu (Tylko przyszłe Piątki):", next_friday, min_value=today)
-            if week_start.weekday() != 4:
-                st.error("⛔ Wybierz PIĄTEK!")
-                st.stop()
             week_end = week_start + timedelta(days=6)
-            st.info(f"Plan: **{week_start.strftime('%d.%m')} - {week_end.strftime('%d.%m')}**")
+            st.info(f"📅 Planujesz grafik na okres: **{week_start.strftime('%d.%m')} (Pt) - {week_end.strftime('%d.%m')} (Cz)**")
         
         preload_demo_data(week_start)
         
@@ -426,7 +401,7 @@ if st.session_state.user_role == "manager":
                     el = c_t3.time_input(f"Koniec Ost.", time(0,0), key=f"el_{i}")
                     
                     st.write("---")
-                    st.markdown("##### Obsada:")
+                    st.markdown("##### Obsada w tym dniu:")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
                     k = c1.selectbox("KASA", [0,1,2], index=1, key=f"k_{i}")
                     b1 = c2.selectbox("BAR 1", [0,1,2,3], index=1, key=f"b1_{i}")
@@ -440,7 +415,7 @@ if st.session_state.user_role == "manager":
                 })
 
         st.write("---")
-        if st.button("⚡ GENERUJ GRAFIK", type="primary"):
+        if st.button("⚡ GENERUJ CAŁY TYDZIEŃ", type="primary"):
             mask = (st.session_state.shifts['Data'] >= week_days[0]) & (st.session_state.shifts['Data'] <= week_days[-1])
             st.session_state.shifts = st.session_state.shifts[~mask]
             
@@ -474,7 +449,7 @@ if st.session_state.user_role == "manager":
                     if worker_name is not None: assigned_today[t_type].append(worker_name)
                     cnt += 1
             
-            st.success(f"Wygenerowano {cnt} zmian! Przejdź do 'Grafik (WIZUALNY)'")
+            st.success(f"Wygenerowano {cnt} zmian! Przejdź do zakładki 'Grafik (WIZUALNY)'.")
 
     # --- 2. DYSPOZYCJE ---
     elif menu == "Dyspozycje (Szybkie)":
@@ -514,16 +489,30 @@ if st.session_state.user_role == "manager":
 
     # --- 3. KADRY ---
     elif menu == "Kadry":
-        st.title("📇 Kadry")
-        st.dataframe(st.session_state.employees[["Imie", "Role", "Plec"]])
+        st.title("📇 Kadry (A-Z)")
+        display_df = st.session_state.employees[["ID", "Imie", "Role", "Plec"]].copy().rename(columns={"ID": "Lp."})
+        st.dataframe(display_df, hide_index=True)
 
-elif st.session_state.user_role == "worker":
-    with st.sidebar:
-        st.title(f"👋 {st.session_state.user_name}")
-        menu = st.radio("Menu:", ["📅 Mój Grafik", "✍️ Dyspozycje"])
-        if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
-    
-    if menu == "📅 Mój Grafik":
-        st.title("Mój Grafik")
-        my = st.session_state.shifts[st.session_state.shifts['Pracownik_Imie'] == st.session_state.user_name]
-        if not my.empty: st.dataframe(my[["Data", "Stanowisko", "Godziny"]], use_container_width=True)
+    # --- 4. GRAFIK (WIZUALNY) ---
+    elif menu == "Grafik (WIZUALNY)":
+        st.title("📋 Grafik Wizualny")
+        today = datetime.now().date()
+        days_ahead = 4 - today.weekday()
+        if days_ahead <= 0: days_ahead += 7
+        next_friday = today + timedelta(days=days_ahead)
+        if today.weekday() == 4: next_friday = today
+        
+        d_start = st.date_input("Pokaż tydzień od (Piątek):", next_friday)
+        d_end = d_start + timedelta(days=6)
+        mask = (st.session_state.shifts['Data'] >= d_start) & (st.session_state.shifts['Data'] <= d_end)
+        df_view = st.session_state.shifts.loc[mask]
+        
+        if not df_view.empty:
+            html_table = render_html_schedule(df_view, d_start)
+            st.markdown(html_table, unsafe_allow_html=True)
+            st.write("---")
+            if st.button("🖨️ POBIERZ PDF"):
+                pdf_bytes = generate_schedule_pdf(df_view, f"GRAFIK: {d_start.strftime('%d.%m')} - {d_end.strftime('%d.%m')}")
+                st.download_button("Pobierz Plik", pdf_bytes, "grafik.pdf", "application/pdf")
+        else:
+            st.info("Brak grafiku.")
