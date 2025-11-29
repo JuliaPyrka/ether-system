@@ -6,7 +6,7 @@ import random
 import re
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | COMPLETE SYSTEM", layout="wide")
+st.set_page_config(page_title="ETHER | SMART TIMESHEET", layout="wide")
 
 # --- STYLE CSS ---
 st.markdown("""
@@ -71,10 +71,9 @@ def clean_text(text):
 def is_availability_locked():
     """Blokada edycji w Poniedziałek o 23:00"""
     now = datetime.now()
-    # 0=Pon, 6=Nd
     if now.weekday() == 0 and now.hour >= 23: return True
-    if now.weekday() > 0: return True # Wt-Nd zablokowane
-    return False # W Piątek-Poniedziałek można edytować
+    if now.weekday() > 0: return True 
+    return False 
 
 # --- PARSER DYSPOZYCJI ---
 def is_avail_compatible(avail_str, shift_type):
@@ -114,7 +113,6 @@ def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_df, 
             if women: final_candidate = random.choice(women)
     else:
         final_candidate = random.choice([c['Imie'] for c in candidates])
-        
     return final_candidate
 
 # --- GENERATOR HTML ---
@@ -183,8 +181,7 @@ def generate_schedule_pdf(df_shifts, title):
 def preload_demo_data(start_date):
     demo_avail = {
         "Julia Bąk": ["16-1", "-", "8-1", "-", "16-1", "-", "16-1"], 
-        "Kacper Borzechowski": ["-", "8-1", "8-1", "16-1", "8-1", "16-1", "16-1"],
-        # ... (możesz tu wkleić resztę danych demo, jeśli chcesz) ...
+        "Kacper Borzechowski": ["-", "8-1", "8-1", "16-1", "8-1", "16-1", "16-1"]
     }
     days = [start_date + timedelta(days=i) for i in range(7)]
     for name, avails in demo_avail.items():
@@ -253,15 +250,130 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ==========================================
+# PRACOWNIK
+# ==========================================
+if st.session_state.user_role == "worker":
+    with st.sidebar:
+        st.title(f"👋 {st.session_state.user_name}")
+        st.caption("Panel Pracownika")
+        menu = st.radio("Menu:", ["📅 Mój Grafik", "✍️ Moja Dyspozycyjność", "⏱️ Karta Czasu Pracy"])
+        st.divider()
+        if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
+
+    # 1. MÓJ GRAFIK
+    if menu == "📅 Mój Grafik":
+        st.title("Mój Grafik")
+        my_shifts = st.session_state.shifts[st.session_state.shifts['Pracownik_Imie'] == st.session_state.user_name]
+        
+        if not my_shifts.empty:
+            st.dataframe(my_shifts[["Data", "Stanowisko", "Godziny"]], use_container_width=True)
+        else:
+            st.info("Nie masz zmian w najbliższym grafiku.")
+
+    # 2. DYSPOZYCJE
+    elif menu == "✍️ Moja Dyspozycyjność":
+        st.title("Moja Dyspozycyjność")
+        is_locked = is_availability_locked()
+        if is_locked: st.error("🔒 Edycja zablokowana (po terminie).")
+        else: st.success("🔓 Edycja otwarta.")
+        
+        today = datetime.now().date()
+        days_ahead = 4 - today.weekday()
+        if days_ahead <= 0: days_ahead += 7
+        next_friday = today + timedelta(days=days_ahead)
+        days = [next_friday + timedelta(days=i) for i in range(7)]
+        day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
+        
+        with st.form("worker_avail"):
+            cols = st.columns(7)
+            for i, d in enumerate(days):
+                cols[i].write(f"**{day_names[i]}** {d.strftime('%d.%m')}")
+                key = f"{st.session_state.user_name}_{d.strftime('%Y-%m-%d')}"
+                val = st.session_state.avail_grid.get(key, "")
+                new_val = cols[i].text_input("h", val, key=f"w_{key}", disabled=is_locked, label_visibility="collapsed")
+                if not is_locked: st.session_state.avail_grid[key] = new_val
+            if not is_locked: st.form_submit_button("Zapisz")
+
+    # 3. KARTA CZASU (SMART)
+    elif menu == "⏱️ Karta Czasu Pracy":
+        st.title("Ewidencja")
+        
+        # Filtrujemy zmiany TYLKO dla tego pracownika
+        my_shifts = st.session_state.shifts[st.session_state.shifts['Pracownik_Imie'] == st.session_state.user_name]
+        
+        if my_shifts.empty:
+            st.warning("Nie masz przypisanych zmian w grafiku, więc nie możesz dodać czasu pracy.")
+        else:
+            # Tworzymy listę zmian do wyboru w liście rozwijanej
+            # Format: "2025-11-28 | Kasa (08:00-16:00)"
+            shift_options = my_shifts.apply(lambda x: f"{x['Data']} | {x['Stanowisko']} ({x['Godziny']})", axis=1).tolist()
+            
+            with st.container():
+                st.markdown("<div class='timesheet-card'>", unsafe_allow_html=True)
+                
+                selected_shift_str = st.selectbox("Wybierz zmianę do rozliczenia:", shift_options)
+                
+                # Parsowanie wyboru, żeby wyciągnąć godziny domyślne
+                # "2025-11-28 | Kasa (08:00-16:00)" -> start=08:00, end=16:00
+                default_start = time(16,0)
+                default_end = time(0,0)
+                
+                try:
+                    # Wyciągamy godziny z nawiasu
+                    hours_part = selected_shift_str.split("(")[1].replace(")", "")
+                    s_str, e_str = hours_part.split("-")
+                    default_start = datetime.strptime(s_str, "%H:%M").time()
+                    default_end = datetime.strptime(e_str, "%H:%M").time()
+                except:
+                    pass # Jeśli coś pójdzie nie tak, zostają domyślne
+                
+                c1, c2, c3 = st.columns(3)
+                
+                # Data jest zablokowana (wynika z wyboru zmiany)
+                shift_date_str = selected_shift_str.split(" | ")[0]
+                c1.text_input("Data", value=shift_date_str, disabled=True)
+                
+                # Godziny są edytowalne, ale podpowiedziane
+                log_start = c2.time_input("Start Rzeczywisty", value=default_start)
+                log_end = c3.time_input("Koniec Rzeczywisty", value=default_end)
+                
+                if st.button("➕ ZATWIERDŹ CZAS PRACY"):
+                    # Obliczenia
+                    l_date = datetime.strptime(shift_date_str, "%Y-%m-%d").date()
+                    dt1 = datetime.combine(l_date, log_start)
+                    dt2 = datetime.combine(l_date, log_end)
+                    if dt2 < dt1: dt2 += timedelta(days=1)
+                    
+                    hours = (dt2 - dt1).total_seconds() / 3600
+                    
+                    st.session_state.work_logs.loc[len(st.session_state.work_logs)] = {
+                        "Pracownik": st.session_state.user_name,
+                        "Data": l_date,
+                        "Start": log_start,
+                        "Koniec": log_end,
+                        "Godziny": round(hours, 2)
+                    }
+                    st.success(f"Zaksięgowano: {hours:.2f}h")
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+            
+            st.divider()
+            # Tabela wyników
+            my_logs = st.session_state.work_logs[st.session_state.work_logs['Pracownik'] == st.session_state.user_name]
+            if not my_logs.empty:
+                st.metric("Suma Godzin (Miesiąc)", f"{my_logs['Godziny'].sum():.2f} h")
+                st.dataframe(my_logs, use_container_width=True)
+
+# ==========================================
 # MENEDŻER
 # ==========================================
-if st.session_state.user_role == "manager":
+elif st.session_state.user_role == "manager":
     with st.sidebar:
         st.title("🔧 PANEL KIEROWNIKA")
         menu = st.radio("Nawigacja:", ["Auto-Planer (LOGISTIC)", "Dyspozycje (Szybkie)", "Kadry", "Grafik (WIZUALNY)"])
         if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
 
-    # --- 1. AUTO-PLANER (LOGISTIC) ---
+    # --- 1. AUTO-PLANER ---
     if menu == "Auto-Planer (LOGISTIC)":
         st.title("🚀 Generator Logistyczny")
         
@@ -274,9 +386,6 @@ if st.session_state.user_role == "manager":
         with st.container(border=True):
             st.markdown("### 1. Wybierz Tydzień")
             week_start = st.date_input("Start cyklu (Tylko przyszłe Piątki):", next_friday, min_value=today)
-            if week_start.weekday() != 4:
-                st.error("⛔ BŁĄD: Grafiki w kinie muszą zaczynać się w PIĄTEK!")
-                st.stop()
             week_end = week_start + timedelta(days=6)
             st.info(f"📅 Planujesz grafik na okres: **{week_start.strftime('%d.%m')} (Pt) - {week_end.strftime('%d.%m')} (Cz)**")
         
@@ -412,71 +521,3 @@ if st.session_state.user_role == "manager":
                 st.download_button("Pobierz Plik", pdf_bytes, "grafik.pdf", "application/pdf")
         else:
             st.info("Brak grafiku.")
-
-# ==========================================
-# PRACOWNIK
-# ==========================================
-elif st.session_state.user_role == "worker":
-    with st.sidebar:
-        st.title(f"👋 {st.session_state.user_name}")
-        st.caption("Panel Pracownika")
-        menu = st.radio("Menu:", ["📅 Mój Grafik", "✍️ Moja Dyspozycyjność", "⏱️ Karta Czasu Pracy"])
-        st.divider()
-        if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
-
-    # 1. MÓJ GRAFIK
-    if menu == "📅 Mój Grafik":
-        st.title("Mój Grafik")
-        my_shifts = st.session_state.shifts[st.session_state.shifts['Pracownik_Imie'] == st.session_state.user_name]
-        if not my_shifts.empty:
-            st.dataframe(my_shifts[["Data", "Stanowisko", "Godziny"]], use_container_width=True)
-        else: st.info("Brak zmian.")
-
-    # 2. DYSPOZYCJE
-    elif menu == "✍️ Moja Dyspozycyjność":
-        st.title("Moja Dyspozycyjność")
-        is_locked = is_availability_locked()
-        if is_locked: st.error("🔒 Edycja zablokowana (po terminie).")
-        else: st.success("🔓 Edycja otwarta.")
-        
-        today = datetime.now().date()
-        days_ahead = 4 - today.weekday()
-        if days_ahead <= 0: days_ahead += 7
-        next_friday = today + timedelta(days=days_ahead)
-        days = [next_friday + timedelta(days=i) for i in range(7)]
-        day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
-        
-        with st.form("worker_avail"):
-            cols = st.columns(7)
-            for i, d in enumerate(days):
-                cols[i].write(f"**{day_names[i]}** {d.strftime('%d.%m')}")
-                key = f"{st.session_state.user_name}_{d.strftime('%Y-%m-%d')}"
-                val = st.session_state.avail_grid.get(key, "")
-                new_val = cols[i].text_input("h", val, key=f"w_{key}", disabled=is_locked, label_visibility="collapsed")
-                if not is_locked: st.session_state.avail_grid[key] = new_val
-            if not is_locked: st.form_submit_button("Zapisz")
-
-    # 3. KARTA CZASU
-    elif menu == "⏱️ Karta Czasu Pracy":
-        st.title("Ewidencja")
-        with st.container():
-            st.markdown("<div class='timesheet-card'>", unsafe_allow_html=True)
-            c1, c2, c3, c4 = st.columns(4)
-            l_date = c1.date_input("Data")
-            l_start = c2.time_input("Start", time(16,0))
-            l_end = c3.time_input("Koniec", time(0,0))
-            if c4.button("Dodaj"):
-                dt1 = datetime.combine(l_date, l_start)
-                dt2 = datetime.combine(l_date, l_end)
-                if dt2 < dt1: dt2 += timedelta(days=1)
-                hours = (dt2 - dt1).total_seconds() / 3600
-                st.session_state.work_logs.loc[len(st.session_state.work_logs)] = {
-                    "Pracownik": st.session_state.user_name, "Data": l_date, "Start": l_start, "Koniec": l_end, "Godziny": round(hours, 2)
-                }
-                st.success(f"Dodano {hours:.2f}h")
-            st.markdown("</div>", unsafe_allow_html=True)
-        st.divider()
-        my_logs = st.session_state.work_logs[st.session_state.work_logs['Pracownik'] == st.session_state.user_name]
-        if not my_logs.empty:
-            st.metric("Suma Godzin", f"{my_logs['Godziny'].sum():.2f} h")
-            st.dataframe(my_logs)
