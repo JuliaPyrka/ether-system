@@ -775,11 +775,8 @@ elif st.session_state.user_role == "manager":
                 st.rerun()
 
             if not df_view.empty:
-            components.html(
-                render_html_schedule(df_view, d_start),
-                height=600,
-                scrolling=True
-            )
+                # POPRAWKA: Wcięcie (indentation) oraz powrót do st.markdown dla stylów CSS
+                st.markdown(render_html_schedule(df_view, d_start), unsafe_allow_html=True)
                 
                 c1, c2 = st.columns(2)
                 if c1.button("🖨️ PDF"):
