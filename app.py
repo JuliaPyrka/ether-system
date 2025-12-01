@@ -8,7 +8,7 @@ import json
 import os
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | FIXED", layout="wide")
+st.set_page_config(page_title="ETHER | STABLE CORE", layout="wide")
 DATA_FOLDER = "ether_data"
 
 # --- STYLE CSS ---
@@ -49,7 +49,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- SYSTEM PLIKÓW (PAMIĘĆ TRWAŁA) ---
+# --- SYSTEM PLIKÓW ---
 if not os.path.exists(DATA_FOLDER): os.makedirs(DATA_FOLDER)
 
 def load_json(filename, default):
@@ -144,6 +144,7 @@ def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_list
 
     if not candidates: return None
 
+    # Algorytm Sprawiedliwości (najmniej zmian)
     candidates.sort(key=lambda x: (shift_counts.get(x['Imie'], 0), random.random()))
     
     final_candidate_name = None
@@ -236,8 +237,8 @@ if 'db_logs' not in st.session_state:
 if 'db_inbox' not in st.session_state:
     st.session_state.db_inbox = load_json('db_inbox.json', {})
 
-# DEMO DANE (Jeśli puste)
 if not st.session_state.db_employees:
+    # Demo
     raw_data = [
         {"Imie": "Julia Bąk", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"], "Plec": "K"},
         {"Imie": "Kacper Borzechowski", "Role": ["Bar", "Obsługa", "Plakaty (Techniczne)"], "Plec": "M"},
@@ -273,7 +274,6 @@ if not st.session_state.db_employees:
     
     if "julia" not in st.session_state.db_users:
         st.session_state.db_users["julia"] = {"pass": "julia1", "role": "worker", "name": "Julia Bąk"}
-    
     save_all()
 
 def save_all():
@@ -462,14 +462,13 @@ elif st.session_state.user_role == "manager":
         week_days = [week_start + timedelta(days=i) for i in range(7)]
         week_config = []
         tabs = st.tabs([f"{d.strftime('%d.%m')}" for i, d in enumerate(week_days)])
-        
         for i, tab in enumerate(tabs):
             with tab:
                 with st.container(border=True):
-                    c_t1, c_t2, c_t3 = st.columns(3)
-                    s1 = c_t1.time_input(f"1. Film", time(9,0), key=f"s1_{i}")
-                    sl = c_t2.time_input(f"Start Ost.", time(21,0), key=f"sl_{i}")
-                    el = c_t3.time_input(f"Koniec Ost.", time(0,0), key=f"el_{i}")
+                    c1, c2, c3 = st.columns(3)
+                    s1 = c1.time_input(f"1. Film", time(9,0), key=f"s1_{i}")
+                    sl = c2.time_input(f"Start Ost.", time(21,0), key=f"sl_{i}")
+                    el = c3.time_input(f"Koniec Ost.", time(0,0), key=f"el_{i}")
                     st.write("---")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
                     k = c1.selectbox("KASA", [0,1,2], index=1, key=f"k_{i}")
@@ -478,8 +477,7 @@ elif st.session_state.user_role == "manager":
                     c = c4.selectbox("CAFE", [0,1,2], index=1, key=f"c_{i}")
                     om = c5.selectbox("OBS RANO", [1,2,3], index=1, key=f"om_{i}")
                     oe = c6.selectbox("OBS NOC", [1,2,3,4], index=2, key=f"oe_{i}")
-                week_config.append({"date": week_days[i], "times": (s1, sl, el), "counts": (k, b1, b2, c, om, oe)})
-
+                week_config.append({"date": week_days[i], "times": (s1,sl,el), "counts": (k,b1,b2,c,om,oe)})
         if st.button("⚡ GENERUJ", type="primary"):
             current_shifts = st.session_state.db_shifts
             start_s = str(week_days[0])
@@ -491,7 +489,7 @@ elif st.session_state.user_role == "manager":
             for cfg in week_config:
                 d_obj = cfg['date']
                 s1, sl, el = cfg['times']
-                k, b, o = cfg['counts']
+                k, b1, b2, c, om, oe = cfg['counts']
                 start = (datetime.combine(d_obj, s1) - timedelta(minutes=45)).strftime("%H:%M")
                 bar_end = (datetime.combine(d_obj, sl) + timedelta(minutes=15)).strftime("%H:%M")
                 obs_end = (datetime.combine(d_obj, el) + timedelta(minutes=15)).strftime("%H:%M")
@@ -512,7 +510,6 @@ elif st.session_state.user_role == "manager":
                     })
                     if worker_name is not None: assigned_today[t_type].append(worker_name); shift_counts[worker_name] += 1
                     cnt += 1
-            
             for user_login in st.session_state.db_users:
                 if st.session_state.db_users[user_login]['role'] == 'worker':
                     send_notification(user_login, f"Grafik na tydzień {week_start.strftime('%d.%m')} gotowy!")
@@ -567,6 +564,7 @@ elif st.session_state.user_role == "manager":
         tab_g, tab_s = st.tabs(["Grafik", "📊 Statystyki"])
         today = datetime.now().date()
         d_start = st.date_input("Pokaż tydzień od (Piątek):", today)
+        
         df = pd.DataFrame(st.session_state.db_shifts)
         if not df.empty:
             df['DataObj'] = pd.to_datetime(df['Data']).dt.date
@@ -580,7 +578,6 @@ elif st.session_state.user_role == "manager":
                     if st.button("🖨️ PDF"):
                         pdf = generate_schedule_pdf(df_view, f"GRAFIK {d_start}")
                         st.download_button("Pobierz", pdf, "grafik.pdf", "application/pdf")
-                    
                     st.write("---")
                     st.subheader("🛠️ Szybka Korekta")
                     df_view['Label'] = df_view.apply(lambda x: f"{x['Data']} | {x['Stanowisko']} | {x['Pracownik_Imie']}", axis=1)
@@ -590,6 +587,7 @@ elif st.session_state.user_role == "manager":
                     new_person = c2.selectbox("Nowa osoba:", ["WAKAT"] + [e['Imie'] for e in st.session_state.db_employees])
                     if st.button("Zmień"):
                         t_date, t_role, t_curr = target_shift.split(" | ")
+                        # Iterujemy po liście słowników, żeby znaleźć i podmienić
                         for s in st.session_state.db_shifts:
                             if s['Data'] == t_date and s['Stanowisko'] == t_role and s['Pracownik_Imie'] == t_curr:
                                 s['Pracownik_Imie'] = "" if new_person == "WAKAT" else new_person
