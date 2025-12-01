@@ -611,7 +611,10 @@ if st.session_state.user_role == "worker":
 elif st.session_state.user_role == "manager":
     with st.sidebar:
         st.title("🔧 PANEL KIEROWNIKA")
-        menu = st.radio("Nawigacja:", ["Auto-Planer (LOGISTIC)", "Dyspozycje (Podgląd)", "Kadry (Edycja)", "Grafik (WIZUALNY)"])
+        menu = st.radio(
+            "Nawigacja:",
+            ["Auto-Planer (LOGISTIC)", "Dyspozycje (Podgląd)", "Kadry (Edycja)", "Grafik (WIZUALNY)"]
+        )
         if st.button("Wyloguj"):
             st.session_state.logged_in = False
             st.rerun()
@@ -622,9 +625,11 @@ elif st.session_state.user_role == "manager":
         
         today = datetime.now().date()
         days_ahead = 4 - today.weekday()
-        if days_ahead <= 0: days_ahead += 7
+        if days_ahead <= 0:
+            days_ahead += 7
         next_friday = today + timedelta(days=days_ahead)
-        if today.weekday() == 4: next_friday = today
+        if today.weekday() == 4:
+            next_friday = today
 
         # Wybór tygodnia
         c_week, c_info = st.columns([1, 3])
@@ -634,7 +639,10 @@ elif st.session_state.user_role == "manager":
             if week_start.weekday() != 4:
                 st.error("⛔ Wybierz PIĄTEK! Grafik kinowy planujemy od piątku.")
             else:
-                st.info(f"Planowanie dla okresu: {week_start.strftime('%d.%m')} - {(week_start + timedelta(days=6)).strftime('%d.%m')}")
+                st.info(
+                    f"Planowanie dla okresu: {week_start.strftime('%d.%m')} - "
+                    f"{(week_start + timedelta(days=6)).strftime('%d.%m')}"
+                )
 
         if week_start.weekday() == 4:
             week_days = [week_start + timedelta(days=i) for i in range(7)]
@@ -667,8 +675,16 @@ elif st.session_state.user_role == "manager":
                         def config_row(label, key_base, def_m, def_e, max_v=4):
                             r1, r2, r3 = st.columns([2, 1, 1])
                             r1.markdown(f"##### {label}")
-                            val_m = r2.number_input(f"Rano", 0, max_v, def_m, key=f"{key_base}_m_{i}", label_visibility="collapsed")
-                            val_e = r3.number_input(f"Wieczór", 0, max_v, def_e, key=f"{key_base}_e_{i}", label_visibility="collapsed")
+                            val_m = r2.number_input(
+                                "Rano", 0, max_v, def_m,
+                                key=f"{key_base}_m_{i}",
+                                label_visibility="collapsed"
+                            )
+                            val_e = r3.number_input(
+                                "Wieczór", 0, max_v, def_e,
+                                key=f"{key_base}_e_{i}",
+                                label_visibility="collapsed"
+                            )
                             return val_m, val_e
 
                         # Wiersze konfiguracji
@@ -705,12 +721,12 @@ elif st.session_state.user_role == "manager":
                 
                 cnt = 0
                 for cfg in week_config:
-                    d_obj = cfg['date']
-                    s1, sl, el = cfg['times']
+                    d_obj = cfg["date"]
+                    s1, sl, el = cfg["times"]
                     
                     # Logika godzin
                     start_m = (datetime.combine(d_obj, s1) - timedelta(minutes=45)).strftime("%H:%M")
-                    split_time = "16:00" # Punkt zmiany zmian
+                    split_time = "16:00"  # Punkt zmiany zmian
                     
                     # Wyliczenie końców
                     bar_end = (datetime.combine(d_obj, sl) + timedelta(minutes=15)).strftime("%H:%M")
@@ -719,13 +735,12 @@ elif st.session_state.user_role == "manager":
                     tasks = []
                     
                     # Iteracja po rolach i liczbach (Rano / Wieczór)
-                    for role_name, (count_m, count_e) in cfg['counts'].items():
-                        # Generowanie zmian porannych
+                    for role_name, (count_m, count_e) in cfg["counts"].items():
+                        # Rano
                         for _ in range(count_m):
                             tasks.append((role_name, "morning", start_m, split_time))
-                        # Generowanie zmian wieczornych
+                        # Wieczór
                         for _ in range(count_e):
-                            # Dla obsługi koniec jest inny niż dla baru/kasy
                             end_time = obs_end if role_name == "Obsługa" else bar_end
                             tasks.append((role_name, "evening", split_time, end_time))
 
@@ -733,11 +748,16 @@ elif st.session_state.user_role == "manager":
                     
                     # Przydzielanie ludzi
                     for role, t_type, s, e in tasks:
-                        worker_name = find_worker_for_shift_db(role, t_type, d_obj, assigned_today, shift_counts)
+                        worker_name = find_worker_for_shift_db(
+                            role, t_type, d_obj, assigned_today, shift_counts
+                        )
                         final = worker_name if worker_name else "WAKAT"
                         
-                        conn.execute("INSERT INTO shifts (date, role, hours, employee_name, type) VALUES (?, ?, ?, ?, ?)",
-                                     (str(d_obj), role, f"{s}-{e}", final, "Auto"))
+                        conn.execute(
+                            "INSERT INTO shifts (date, role, hours, employee_name, type) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (str(d_obj), role, f"{s}-{e}", final, "Auto")
+                        )
                         
                         if worker_name:
                             assigned_today.append(worker_name)
@@ -767,7 +787,7 @@ elif st.session_state.user_role == "manager":
         for emp in emps:
             row = {"Pracownik": emp[0]}
             for d in days:
-                row[d.strftime('%a')] = get_avail_db(emp[0], d.strftime('%Y-%m-%d'))
+                row[d.strftime("%a")] = get_avail_db(emp[0], d.strftime("%Y-%m-%d"))
             data.append(row)
         conn.close()
         
@@ -785,11 +805,15 @@ elif st.session_state.user_role == "manager":
                 if st.form_submit_button("Utwórz"):
                     conn = get_db_connection()
                     try:
-                        conn.execute("INSERT INTO users (login, password_hash, role, name) VALUES (?, ?, ?, ?)",
-                                     (u_login, hash_password(u_pass), "worker", u_name))
+                        conn.execute(
+                            "INSERT INTO users (login, password_hash, role, name) VALUES (?, ?, ?, ?)",
+                            (u_login, hash_password(u_pass), "worker", u_name)
+                        )
                         auto = calculate_auto_roles(u_roles)
-                        conn.execute("INSERT INTO employees (name, roles, gender, auto_roles) VALUES (?, ?, ?, ?)",
-                                     (u_name, str(u_roles), u_plec, str(auto)))
+                        conn.execute(
+                            "INSERT INTO employees (name, roles, gender, auto_roles) VALUES (?, ?, ?, ?)",
+                            (u_name, str(u_roles), u_plec, str(auto))
+                        )
                         conn.commit()
                         st.success("Dodano!")
                     except Exception as e:
@@ -802,12 +826,11 @@ elif st.session_state.user_role == "manager":
         conn.close()
         st.dataframe(users)
 
-        elif menu == "Grafik (WIZUALNY)":
-        
+    elif menu == "Grafik (WIZUALNY)":
+
         # --- OBSŁUGA KLIKNIĘCIA W WAKAT (MODAL) ---
         @st.dialog("⚡ Uzupełnij Wakat")
         def edit_shift_dialog(shift_id: int):
-            # Pobierz dane zmiany
             conn = get_db_connection()
             s_data = conn.execute(
                 "SELECT date, role, hours FROM shifts WHERE id=?",
@@ -824,7 +847,6 @@ elif st.session_state.user_role == "manager":
             st.write(f"⏰ **Godziny:** {s_hours}")
             st.write(f"🎭 **Stanowisko:** {s_role}")
             
-            # Szukamy dostępnych według dyspozycji + 11h
             d_obj = datetime.strptime(s_date, "%Y-%m-%d").date()
             candidates = get_candidates_for_shift(d_obj, s_role, s_hours)
             
@@ -834,19 +856,18 @@ elif st.session_state.user_role == "manager":
                 selected_emp = st.selectbox("Wybierz pracownika:", candidates)
                 
                 if st.button("Zapisz pracownika"):
-                    conn = get_db_connection()
-                    conn.execute(
+                    conn2 = get_db_connection()
+                    conn2.execute(
                         "UPDATE shifts SET employee_name=? WHERE id=?",
                         (selected_emp, shift_id)
                     )
-                    conn.commit()
-                    conn.close()
+                    conn2.commit()
+                    conn2.close()
                     st.session_state.needs_rerun = True
                     st.rerun()
             else:
                 st.warning("⚠️ Brak pracowników spełniających kryteria (Dyspozycje + 11h).")
 
-                # Lista wszystkich pracowników do wymuszonego przypisania
                 conn2 = get_db_connection()
                 all_emps_force = [
                     r[0] for r in conn2.execute("SELECT name FROM employees").fetchall()
@@ -872,17 +893,13 @@ elif st.session_state.user_role == "manager":
         # Sprawdzenie czy kliknięto w link (parametr URL)
         if "edit_id" in st.query_params:
             s_raw = st.query_params["edit_id"]
-
-            # Streamlit potrafi zwrócić listę – normalizujemy
             if isinstance(s_raw, list):
                 s_raw = s_raw[0]
-
             try:
                 s_id = int(s_raw)
             except (TypeError, ValueError):
                 s_id = None
 
-            # Czyścimy URL, żeby dialog nie wyskakiwał przy każdym odświeżeniu
             st.query_params.clear()
 
             if s_id is not None:
@@ -899,8 +916,8 @@ elif st.session_state.user_role == "manager":
         conn.close()
 
         if not df.empty:
-            df['DataObj'] = pd.to_datetime(df['date']).dt.date
-            df_view = df[(df['DataObj'] >= d_start) & (df['DataObj'] <= d_end)].copy()
+            df["DataObj"] = pd.to_datetime(df["date"]).dt.date
+            df_view = df[(df["DataObj"] >= d_start) & (df["DataObj"] <= d_end)].copy()
         else:
             df_view = pd.DataFrame()
 
@@ -911,7 +928,6 @@ elif st.session_state.user_role == "manager":
                 st.rerun()
 
             if not df_view.empty:
-                # Render HTML z linkami ?edit_id=ID
                 st.markdown(render_html_schedule(df_view, d_start), unsafe_allow_html=True)
                 
                 c1, c2 = st.columns(2)
@@ -924,11 +940,12 @@ elif st.session_state.user_role == "manager":
 
         with tab_s:
             if not df_view.empty:
-                real = df_view[df_view['employee_name'] != "WAKAT"]
-                counts = real['employee_name'].value_counts().reset_index()
+                real = df_view[df_view["employee_name"] != "WAKAT"]
+                counts = real["employee_name"].value_counts().reset_index()
                 counts.columns = ["Pracownik", "Liczba Zmian"]
                 st.bar_chart(counts.set_index("Pracownik"))
                 st.dataframe(counts)
+
 
 
 
