@@ -567,8 +567,8 @@ elif st.session_state.user_role == "manager":
             st.rerun()
 
     if menu == "Auto-Planer (LOGISTIC)":
-        st.title("🚀 Generator Logistyczny V2")
-        st.caption("Algorytm uwzględnia: Dostępność, Kompetencje, Równomierny podział, Zasadę 11h")
+        st.title("🚀 Generator Logistyczny V2.1")
+        st.caption("Precyzyjne planowanie obsady: Rano (☀️) vs Wieczór (🌙)")
         
         today = datetime.now().date()
         days_ahead = 4 - today.weekday()
@@ -576,43 +576,80 @@ elif st.session_state.user_role == "manager":
         next_friday = today + timedelta(days=days_ahead)
         if today.weekday() == 4: next_friday = today
 
-        with st.container(border=True):
+        # Wybór tygodnia
+        c_week, c_info = st.columns([1, 3])
+        with c_week:
             week_start = st.date_input("Start (Piątek):", next_friday, min_value=today)
+        with c_info:
             if week_start.weekday() != 4:
-                st.error("⛔ Wybierz PIĄTEK!")
+                st.error("⛔ Wybierz PIĄTEK! Grafik kinowy planujemy od piątku.")
             else:
-                st.session_state.active_week_start = week_start
+                st.info(f"Planowanie dla okresu: {week_start.strftime('%d.%m')} - {(week_start + timedelta(days=6)).strftime('%d.%m')}")
 
         if week_start.weekday() == 4:
             week_days = [week_start + timedelta(days=i) for i in range(7)]
             week_config = []
             
-            tabs = st.tabs([f"{d.strftime('%d.%m')}" for d in week_days])
+            # --- ZAKŁADKI DNI ---
+            tabs = st.tabs([f"{d.strftime('%A')[:3].upper()} {d.strftime('%d.%m')}" for d in week_days])
+            
             for i, tab in enumerate(tabs):
                 with tab:
+                    # SEKJA 1: GODZINY
+                    st.markdown("### 🕒 Godziny Graniczne")
                     with st.container(border=True):
                         c1, c2, c3 = st.columns(3)
-                        s1 = c1.time_input(f"Film", time(9, 0), key=f"s1_{i}")
-                        sl = c2.time_input(f"Start Ost.", time(21, 0), key=f"sl_{i}")
-                        el = c3.time_input(f"Koniec Ost.", time(0, 0), key=f"el_{i}")
-                        st.write("---")
-                        c1, c2, c3, c4, c5, c6 = st.columns(6)
-                        k = c1.selectbox("KASA", [0, 1, 2], index=1, key=f"k_{i}")
-                        b1 = c2.selectbox("BAR 1", [0, 1, 2, 3], index=1, key=f"b1_{i}")
-                        b2 = c3.selectbox("BAR 2", [0, 1, 2], index=1, key=f"b2_{i}")
-                        c = c4.selectbox("CAFE", [0, 1, 2], index=1, key=f"c_{i}")
-                        om = c5.selectbox("OBS RANO", [1, 2, 3], index=1, key=f"om_{i}")
-                        oe = c6.selectbox("OBS NOC", [1, 2, 3, 4], index=2, key=f"oe_{i}")
-                        week_config.append({"date": week_days[i], "times": (s1, sl, el), "counts": (k, b1, b2, c, om, oe)})
+                        s1 = c1.time_input("Start Pierwszego Seansu", time(9, 0), key=f"s1_{i}")
+                        sl = c2.time_input("Start Ostatniego Seansu", time(21, 0), key=f"sl_{i}")
+                        el = c3.time_input("Koniec Ostatniego Seansu", time(0, 0), key=f"el_{i}")
 
-            if st.button("⚡ GENERUJ GRAFIK", type="primary"):
+                    # SEKJA 2: OBSADA
+                    st.markdown("### 👥 Obsada Stanowisk")
+                    with st.container(border=True):
+                        # Nagłówki tabeli
+                        h1, h2, h3 = st.columns([2, 1, 1])
+                        h1.markdown("**Stanowisko**")
+                        h2.markdown("☀️ **Rano**")
+                        h3.markdown("🌙 **Wieczór**")
+                        st.divider()
+
+                        # Helper do generowania wierszy
+                        def config_row(label, key_base, def_m, def_e, max_v=4):
+                            r1, r2, r3 = st.columns([2, 1, 1])
+                            r1.markdown(f"##### {label}")
+                            val_m = r2.number_input(f"Rano", 0, max_v, def_m, key=f"{key_base}_m_{i}", label_visibility="collapsed")
+                            val_e = r3.number_input(f"Wieczór", 0, max_v, def_e, key=f"{key_base}_e_{i}", label_visibility="collapsed")
+                            return val_m, val_e
+
+                        # Wiersze konfiguracji
+                        k_m, k_e   = config_row("🎟️ KASA", "k", 1, 1)
+                        b1_m, b1_e = config_row("🍿 BAR 1", "b1", 1, 2)
+                        b2_m, b2_e = config_row("🍿 BAR 2", "b2", 0, 1)
+                        c_m, c_e   = config_row("☕ CAFE", "c", 1, 1)
+                        o_m, o_e   = config_row("🧹 OBSŁUGA", "obs", 2, 3)
+
+                        # Zapis konfiguracji dnia
+                        week_config.append({
+                            "date": week_days[i],
+                            "times": (s1, sl, el),
+                            "counts": {
+                                "Kasa": (k_m, k_e),
+                                "Bar 1": (b1_m, b1_e),
+                                "Bar 2": (b2_m, b2_e),
+                                "Cafe": (c_m, c_e),
+                                "Obsługa": (o_m, o_e)
+                            }
+                        })
+
+            st.divider()
+            if st.button("⚡ GENERUJ GRAFIK (NADDPISZ OBECNY)", type="primary", use_container_width=True):
                 conn = get_db_connection()
-                # Usuń stare zmiany z tego zakresu
+                # Usuń stare zmiany
                 start_s, end_s = str(week_days[0]), str(week_days[-1])
                 conn.execute("DELETE FROM shifts WHERE date >= ? AND date <= ?", (start_s, end_s))
                 conn.commit()
 
-                # Inicjalizacja liczników
+                # Pobranie pracowników
                 all_emps = [r[0] for r in conn.execute("SELECT name FROM employees").fetchall()]
                 shift_counts = {name: 0 for name in all_emps}
                 
@@ -620,23 +657,31 @@ elif st.session_state.user_role == "manager":
                 for cfg in week_config:
                     d_obj = cfg['date']
                     s1, sl, el = cfg['times']
-                    k, b1, b2, c_role, om, oe = cfg['counts']
                     
-                    start = (datetime.combine(d_obj, s1) - timedelta(minutes=45)).strftime("%H:%M")
+                    # Logika godzin
+                    start_m = (datetime.combine(d_obj, s1) - timedelta(minutes=45)).strftime("%H:%M")
+                    split_time = "16:00" # Punkt zmiany zmian
+                    
+                    # Wyliczenie końców
                     bar_end = (datetime.combine(d_obj, sl) + timedelta(minutes=15)).strftime("%H:%M")
                     obs_end = (datetime.combine(d_obj, el) + timedelta(minutes=15)).strftime("%H:%M")
-                    split = "16:00"
 
                     tasks = []
-                    for _ in range(k): tasks.extend([("Kasa", "morning", start, split), ("Kasa", "evening", split, bar_end)])
-                    for _ in range(b1): tasks.extend([("Bar 1", "morning", start, split), ("Bar 1", "evening", split, bar_end)])
-                    for _ in range(b2): tasks.extend([("Bar 2", "morning", start, split), ("Bar 2", "evening", split, bar_end)])
-                    for _ in range(c_role): tasks.extend([("Cafe", "morning", start, split), ("Cafe", "evening", split, bar_end)])
-                    for _ in range(om): tasks.append(("Obsługa", "morning", start, split))
-                    for _ in range(oe): tasks.append(("Obsługa", "evening", split, obs_end))
+                    
+                    # Iteracja po rolach i liczbach (Rano / Wieczór)
+                    for role_name, (count_m, count_e) in cfg['counts'].items():
+                        # Generowanie zmian porannych
+                        for _ in range(count_m):
+                            tasks.append((role_name, "morning", start_m, split_time))
+                        # Generowanie zmian wieczornych
+                        for _ in range(count_e):
+                            # Dla obsługi koniec jest inny niż dla baru/kasy
+                            end_time = obs_end if role_name == "Obsługa" else bar_end
+                            tasks.append((role_name, "evening", split_time, end_time))
 
                     assigned_today = []
                     
+                    # Przydzielanie ludzi
                     for role, t_type, s, e in tasks:
                         worker_name = find_worker_for_shift_db(role, t_type, d_obj, assigned_today, shift_counts)
                         final = worker_name if worker_name else "WAKAT"
@@ -650,13 +695,15 @@ elif st.session_state.user_role == "manager":
                         cnt += 1
                 
                 conn.commit()
+                
                 # Powiadomienia
                 users = conn.execute("SELECT login FROM users WHERE role='worker'").fetchall()
                 for u_login in users:
                     send_notification_db(u_login[0], f"Nowy grafik na tydzień {week_start.strftime('%d.%m')}!")
                 
                 conn.close()
-                st.success(f"Wygenerowano {cnt} zmian! Baza zaktualizowana.")
+                st.balloons()
+                st.success(f"Sukces! Wygenerowano {cnt} zmian zgodnie z nową konfiguracją.")
 
     elif menu == "Dyspozycje (Podgląd)":
         st.title("📥 Dyspozycje")
@@ -766,4 +813,5 @@ elif st.session_state.user_role == "manager":
                 counts.columns = ["Pracownik", "Liczba Zmian"]
                 st.bar_chart(counts.set_index("Pracownik"))
                 st.dataframe(counts)
+
 
