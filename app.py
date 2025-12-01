@@ -1,3 +1,4 @@
+import streamlit.components.v1 as components
 import streamlit as st
 import pandas as pd
 from fpdf import FPDF
@@ -793,9 +794,13 @@ elif st.session_state.user_role == "manager":
                     st.rerun()
 
             if not df_view.empty:
-                st.markdown(render_html_schedule(df_view, d_start), unsafe_allow_html=True)
-                st.write("---")
-                if st.button("🖨️ PDF"):
+        components.html(
+            render_html_schedule(df_view, d_start),
+            height=600,
+            scrolling=True
+        )
+        st.write("---")
+        if st.button("🖨️ PDF"):
                     pdf = generate_schedule_pdf(df_view, f"GRAFIK {d_start}")
                     st.download_button("Pobierz PDF", pdf, "grafik.pdf", "application/pdf")
 
@@ -847,4 +852,5 @@ elif st.session_state.user_role == "manager":
                     summary = week_logs.groupby("Pracownik")['Godziny'].sum().reset_index()
                     summary['Szacunkowo [PLN]'] = summary['Godziny'] * HOURLY_RATE
                     st.dataframe(summary, use_container_width=True)
+
 
