@@ -1,17 +1,17 @@
-import streamlit.components.v1 as components
 import streamlit as st
 import pandas as pd
 from fpdf import FPDF
 from datetime import datetime, time, timedelta
 import random
 import re
-import json
 import os
+import sqlite3
+import hashlib
 
 # --- KONFIGURACJA ---
 st.set_page_config(page_title="ETHER | SYNC MASTER", layout="wide")
-DATA_FOLDER = "ether_data"
-HOURLY_RATE = 30.50
+DB_FILE = "ether.db"
+HOURLY_RATE = 30.50  # Poprawiona spacja (Syntax Error fix)
 
 # --- STYLE CSS ---
 st.markdown("""
@@ -39,42 +39,98 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- SYSTEM PLIKÓW ---
-if not os.path.exists(DATA_FOLDER):
-    os.makedirs(DATA_FOLDER)
+# --- OBSŁUGA BAZY DANYCH (SQLite) ---
 
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # Tabela użytkowników
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+                 login TEXT PRIMARY KEY,
+                 password_hash TEXT,
+                 role TEXT,
+                 name TEXT)''')
+    
+    # Tabela pracowników (rozszerzone dane)
+    c.execute('''CREATE TABLE IF NOT EXISTS employees (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 name TEXT,
+                 roles TEXT,
+                 gender TEXT,
+                 auto_roles TEXT)''')
+                 
+    # Tabela zmian
+    c.execute('''CREATE TABLE IF NOT EXISTS shifts (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 date TEXT,
+                 role TEXT,
+                 hours TEXT,
+                 employee_name TEXT,
+                 type TEXT)''')
+                 
+    # Tabela dostępności
+    c.execute('''CREATE TABLE IF NOT EXISTS availability (
+                 key_id TEXT PRIMARY KEY,
+                 employee_name TEXT,
+                 date TEXT,
+                 val TEXT)''')
+                 
+    # Tabela logów czasu pracy
+    c.execute('''CREATE TABLE IF NOT EXISTS logs (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 employee TEXT,
+                 date TEXT,
+                 start TEXT,
+                 end TEXT,
+                 hours REAL)''')
+                 
+    # Tabela powiadomień
+    c.execute('''CREATE TABLE IF NOT EXISTS inbox (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 user_login TEXT,
+                 message TEXT,
+                 timestamp TEXT)''')
+                 
+    conn.commit()
+    conn.close()
+    
+    # Utworzenie konta admina, jeśli nie istnieje
+    create_user_if_not_exists("admin", "admin123", "manager", "Kierownik")
 
-def load_json(filename, default):
-    path = os.path.join(DATA_FOLDER, filename)
-    if os.path.exists(path):
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return default
-    return default
+def get_db_connection():
+    return sqlite3.connect(DB_FILE, check_same_thread=False)
 
+def hash_password(password):
+    return hashlib.sha256(str(password).encode('utf-8')).hexdigest()
 
-def save_json(filename, data):
-    path = os.path.join(DATA_FOLDER, filename)
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+def create_user_if_not_exists(login, password, role, name):
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT login FROM users WHERE login=?", (login,))
+    if not c.fetchone():
+        c.execute("INSERT INTO users (login, password_hash, role, name) VALUES (?, ?, ?, ?)",
+                  (login, hash_password(password), role, name))
+        conn.commit()
+    conn.close()
 
+def check_login_db(u, p):
+    conn = get_db_connection()
+    c = conn.cursor()
+    # Haszujemy wpisane hasło i porównujemy z bazą
+    p_hash = hash_password(p)
+    c.execute("SELECT role, name FROM users WHERE login=? AND password_hash=?", (u, p_hash))
+    res = c.fetchone()
+    conn.close()
+    if res:
+        return {"role": res[0], "name": res[1]}
+    return None
 
-def save_all():
-    save_json('db_users.json', st.session_state.db_users)
-    save_json('db_employees.json', st.session_state.db_employees)
-    save_json('db_shifts.json', st.session_state.db_shifts)
-    save_json('db_avail.json', st.session_state.db_avail)
-    save_json('db_logs.json', st.session_state.db_logs)
-    save_json('db_inbox.json', st.session_state.db_inbox)
+# --- FUNKCJE POMOCNICZE ---
 
-
-# --- FUNKCJE ---
 def polish_sort_key(text):
     alphabet = {'ą': 'a1', 'ć': 'c1', 'ę': 'e1', 'ł': 'l1', 'ń': 'n1', 'ó': 'o1', 'ś': 's1', 'ź': 'z1', 'ż': 'z2'}
     return "".join([alphabet.get(c.lower(), c.lower()) for c in text])
-
 
 def calculate_auto_roles(selected_roles):
     auto = ["Sprzątanie Generalne"]
@@ -84,120 +140,141 @@ def calculate_auto_roles(selected_roles):
         auto.extend(["Pomoc Bar", "Pomoc Obsługa"])
     return list(set(auto))
 
-
-def check_login(u, p):
-    users = st.session_state.db_users
-    if u in users and users[u]["pass"] == p:
-        return {"role": users[u]["role"], "name": users[u]["name"]}
-    return None
-
-
 def clean_text(text):
     if not isinstance(text, str):
         text = str(text)
-    replacements = {
-        'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l',
-        'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z',
-        'ż': 'z', '–': '-'
-    }
+    replacements = {'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z', '–': '-'}
     for k, v in replacements.items():
         text = text.replace(k, v)
     return text.encode('latin-1', 'ignore').decode('latin-1')
 
-
 def is_availability_locked():
     now = datetime.now()
-    # Wtorek–czwartek blokada, poniedziałek po 23 też blokada
-    if now.weekday() in [1, 2, 3]:
-        return True
-    if now.weekday() == 0 and now.hour >= 23:
-        return True
+    if now.weekday() in [1, 2, 3]: return True
+    if now.weekday() == 0 and now.hour >= 23: return True
     return False
 
+def send_notification_db(to_user_login, message):
+    conn = get_db_connection()
+    ts = datetime.now().strftime("%d.%m %H:%M")
+    conn.execute("INSERT INTO inbox (user_login, message, timestamp) VALUES (?, ?, ?)", (to_user_login, message, ts))
+    conn.commit()
+    conn.close()
 
-def send_notification(to_user_login, message):
-    if 'db_inbox' not in st.session_state:
-        st.session_state.db_inbox = {}
-    if to_user_login not in st.session_state.db_inbox:
-        st.session_state.db_inbox[to_user_login] = []
-    timestamp = datetime.now().strftime("%d.%m %H:%M")
-    st.session_state.db_inbox[to_user_login].insert(0, f"[{timestamp}] {message}")
-    save_json('db_inbox.json', st.session_state.db_inbox)
+def get_avail_db(name, date_str):
+    conn = get_db_connection()
+    c = conn.cursor()
+    key = f"{name}_{date_str}"
+    c.execute("SELECT val FROM availability WHERE key_id=?", (key,))
+    res = c.fetchone()
+    conn.close()
+    return res[0] if res else ""
 
+def save_avail_db(name, date_str, val):
+    conn = get_db_connection()
+    key = f"{name}_{date_str}"
+    conn.execute("INSERT OR REPLACE INTO availability (key_id, employee_name, date, val) VALUES (?, ?, ?, ?)", 
+                 (key, name, date_str, val))
+    conn.commit()
+    conn.close()
 
-def preload_demo_data(start_date):
-    if not st.session_state.db_avail:
-        demo_avail = {
-            "Julia Bąk": ["16-1", "-", "8-1", "-", "16-1", "-", "16-1"],
-            "Kacper Borzechowski": ["-", "8-1", "8-1", "16-1", "8-1", "16-1", "16-1"],
-        }
-        days = [start_date + timedelta(days=i) for i in range(7)]
-        for name, avails in demo_avail.items():
-            for i, val in enumerate(avails):
-                key = f"{name}_{days[i].strftime('%Y-%m-%d')}"
-                st.session_state.db_avail[key] = val
-        save_json('db_avail.json', st.session_state.db_avail)
-
+# --- ALGORYTMY GRAFIKOWE (UPGRADE) ---
 
 def is_avail_compatible(avail_str, shift_type):
-    """
-    Obsługuje formaty:
-    - "8-16"
-    - "16-1"
-    - kilka przedziałów, np. "8-12/16-1"
-    Godziny jako liczby całkowite (bez minut).
-    """
     if not avail_str or avail_str.strip() == "-" or len(avail_str.strip()) < 3:
         return False
-
     clean = avail_str.replace(" ", "")
     segments = clean.split("/")
-
     for seg in segments:
-        if not seg:
-            continue
+        if not seg: continue
         try:
             parts = re.split(r'[-–]', seg)
-            if len(parts) != 2:
-                continue
-            s = int(parts[0])
-            e = int(parts[1])
-        except Exception:
-            continue
+            if len(parts) != 2: continue
+            s, e = int(parts[0]), int(parts[1])
+        except: continue
 
-        # Poranne / wieczorne wg prostych reguł
         if shift_type == 'morning':
-            # start 6–12, koniec >=15 lub po północy (0–4)
-            if (6 <= s <= 12) and (e >= 15 or e <= 4):
-                return True
+            if (6 <= s <= 12) and (e >= 15 or e <= 4): return True
         elif shift_type == 'evening':
-            # start max 17, koniec >=22 lub po północy
-            if (s <= 17) and (e <= 4 or e >= 22):
-                return True
-
+            if (s <= 17) and (e <= 4 or e >= 22): return True
     return False
 
+def check_11h_rule(employee_name, current_date_obj, shift_type, conn):
+    """
+    Sprawdza, czy pracownik nie miał późnej zmiany poprzedniego dnia.
+    Jeśli zmiana jest rano, a wczoraj kończył po północy -> False.
+    """
+    if shift_type != 'morning':
+        return True # Wieczorem zazwyczaj ok, chyba że pracował rano (ale tu upraszczamy)
+    
+    yesterday = (current_date_obj - timedelta(days=1)).strftime('%Y-%m-%d')
+    c = conn.cursor()
+    c.execute("SELECT hours FROM shifts WHERE employee_name=? AND date=?", (employee_name, yesterday))
+    prev_shifts = c.fetchall()
+    
+    for row in prev_shifts:
+        h_str = row[0]
+        try:
+            _, end_part = h_str.split("-")
+            end_h = int(end_part.split(":")[0])
+            # Jeśli kończył między 0:00 a 5:00 rano
+            if 0 <= end_h <= 5:
+                return False
+            # Jeśli kończył późno w nocy np. 23, a start jest 9 rano - to jest 10h, mało.
+            if end_h >= 23:
+                return False
+        except:
+            pass
+    return True
 
-def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_list, avail_grid, assigned_today, shift_counts):
+def find_worker_for_shift_db(role_needed, shift_time_type, date_obj, assigned_today_names, shift_counts):
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # Pobierz wszystkich pracowników
+    c.execute("SELECT name, roles, gender, auto_roles FROM employees")
+    all_emps = []
+    for row in c.fetchall():
+        all_emps.append({
+            "Imie": row[0],
+            "Role": row[1], # json string or simple string? Assuming eval for list
+            "Plec": row[2],
+            "Auto": row[3]
+        })
+    
     candidates = []
     date_str = date_obj.strftime('%Y-%m-%d')
-
-    for emp in employees_list:
-        if emp['Imie'] in assigned_today[shift_time_type]:
+    
+    for emp in all_emps:
+        # 1. Czy już pracuje dzisiaj?
+        if emp['Imie'] in assigned_today_names:
+            continue
+            
+        # 2. Czy ma kompetencje?
+        role_base = role_needed.replace(" 1", "").replace(" 2", "")
+        # Parsowanie stringa listy ról (proste obejście, lepiej trzymać json)
+        emp_roles = emp['Role'] 
+        emp_auto = emp['Auto']
+        
+        if role_base not in emp_roles and role_base not in emp_auto:
             continue
 
-        role_base = role_needed.replace(" 1", "").replace(" 2", "")
-        if role_base in emp['Role'] or role_base in emp['Auto']:
-            key = f"{emp['Imie']}_{date_str}"
-            avail = avail_grid.get(key, "")
-            if is_avail_compatible(avail, shift_time_type):
+        # 3. Sprawdź dostępność w bazie
+        avail = get_avail_db(emp['Imie'], date_str)
+        if is_avail_compatible(avail, shift_time_type):
+            # 4. Sprawdź zasadę 11h (Kodeks Pracy)
+            if check_11h_rule(emp['Imie'], date_obj, shift_time_type, conn):
                 candidates.append(emp)
+    
+    conn.close()
 
     if not candidates:
         return None
 
-    # Sortowanie po liczbie zmian + losowość
-    candidates.sort(key=lambda x: (shift_counts.get(x['Imie'], 0), random.random()))
+    # Algorytm sprawiedliwości: Sortuj wg liczby zmian (rosnąco) -> potem losowo
+    # Dzięki temu osoby z 0 zmianami są brane pierwsze
+    random.shuffle(candidates) # najpierw tasowanie dla osób z tą samą liczbą
+    candidates.sort(key=lambda x: shift_counts.get(x['Imie'], 0))
 
     final_candidate_name = None
     if role_needed == "Obsługa":
@@ -208,16 +285,18 @@ def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_list
             women = [c for c in candidates if c.get('Plec') == 'K']
             if women:
                 final_candidate_name = women[0]['Imie']
-    else:
+    
+    if not final_candidate_name and candidates:
         final_candidate_name = candidates[0]['Imie']
 
     return final_candidate_name
 
+# --- HTML & PDF ---
 
-def render_html_schedule(shifts_data, start_date):
+def render_html_schedule(df, start_date):
     days = [start_date + timedelta(days=i) for i in range(7)]
     date_header_str = f"{start_date.strftime('%d.%m')} - {days[-1].strftime('%d.%m')}"
-
+    
     html = f"""
     <div style="background-color: #333; color: white; padding: 10px; text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 0px; border-radius: 5px 5px 0 0;">
         GRAFIK: {date_header_str}
@@ -227,166 +306,95 @@ def render_html_schedule(shifts_data, start_date):
             <tr>
                 <th style="width: 8%;">STANOWISKO</th>
     """
-
     for d in days:
         w_day = d.weekday()
-        day_map = {
-            4: "PIĄTEK",
-            5: "SOBOTA",
-            6: "NIEDZIELA",
-            0: "PONIEDZIAŁEK",
-            1: "WTOREK",
-            2: "ŚRODA",
-            3: "CZWARTEK"
-        }
-        # wyróżnienie weekendu: piątek, sobota, niedziela
-        style = 'style="background-color: #2c5282;"' if w_day in [4, 5, 6] else ''
-        html += f'<th {style}><div class="day-header">{day_map[w_day]}<br>{d.strftime("%d.%m")}</div></th>'
-
+        day_map = {4:"PIĄTEK", 5:"SOBOTA", 6:"NIEDZIELA", 0:"PONIEDZIAŁEK", 1:"WTOREK", 2:"ŚRODA", 3:"CZWARTEK"}
+        style = 'style="background-color: #2c5282;"' if w_day in [4,5,6] else ''
+        html += f'<th {style}><div class="day-header">{day_map.get(w_day, "")}<br>{d.strftime("%d.%m")}</div></th>'
+    
     html += '</tr></thead><tbody>'
-
     visual_roles = ["Obsługa", "Kasa", "Bar 1", "Bar 2", "Cafe"]
-    df = pd.DataFrame(shifts_data)
+    
     if not df.empty:
-        df['Data_Obj'] = pd.to_datetime(df['Data']).dt.date
-
+        df['Data_Obj'] = pd.to_datetime(df['date']).dt.date
+    
     for role in visual_roles:
         html += f'<tr><td class="role-header">{role.upper()}</td>'
         for d in days:
             w_day = d.weekday()
-            td_class = 'class="highlight-day"' if w_day in [4, 5, 6] else ''
+            td_class = 'class="highlight-day"' if w_day in [4,5,6] else ''
             cell_content = ""
             if not df.empty:
-                current_shifts = df[(df['Data_Obj'] == d) & (df['Stanowisko'].str.contains(role, regex=False))]
+                current_shifts = df[(df['Data_Obj'] == d) & (df['role'].str.contains(role, regex=False))]
                 for _, row in current_shifts.iterrows():
-                    if row['Pracownik_Imie'] == "" or row['Pracownik_Imie'] == "WAKAT":
-                        cell_content += f'''
-                            <div class="empty-shift-box">
-                                <span class="empty-time">{row["Godziny"]}</span>
-                            </div>
-                        '''
+                    emp_name = row['employee_name']
+                    if not emp_name or emp_name == "WAKAT":
+                        cell_content += f'<div class="empty-shift-box"><span class="empty-time">{row["hours"]}</span></div>'
                     else:
-                        display_pos = "(Combo)" if "+" in row['Stanowisko'] else ""
-                        parts = row['Pracownik_Imie'].split(" ")
-                        if len(parts) >= 2:
-                            short = parts[0] + " " + parts[-1][0] + "."
-                        else:
-                            short = row['Pracownik_Imie']
-                        cell_content += f'''
-                            <div class="shift-box">
-                                <span class="shift-time">{row["Godziny"]}</span>
-                                <span class="shift-name">{short} {display_pos}</span>
-                            </div>
-                        '''
+                        display_pos = "(Combo)" if "+" in row['role'] else ""
+                        parts = emp_name.split(" ")
+                        short = (parts[0] + " " + parts[-1][0] + ".") if len(parts) >= 2 else emp_name
+                        cell_content += f'<div class="shift-box"><span class="shift-time">{row["hours"]}</span><span class="shift-name">{short} {display_pos}</span></div>'
             html += f'<td {td_class}>{cell_content}</td>'
         html += '</tr>'
-
     html += '</tbody></table>'
     return html
 
-
-def generate_schedule_pdf(shifts_data, title):
+def generate_schedule_pdf(df, title):
     pdf = FPDF('L', 'mm', 'A4')
     pdf.add_page()
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, clean_text(title), ln=True, align='C')
     pdf.ln(5)
     pdf.set_font("Arial", '', 8)
-    df = pd.DataFrame(shifts_data)
-    if df.empty:
-        return pdf.output(dest='S').encode('latin-1')
-    days = sorted(df['Data'].unique())
+    if df.empty: return pdf.output(dest='S').encode('latin-1')
+    
+    days = sorted(df['date'].unique())
     for day in days:
         d_str = pd.to_datetime(day).strftime('%d.%m (%A)')
         pdf.set_font("Arial", 'B', 12)
         pdf.cell(0, 10, clean_text(f"--- {d_str} ---"), ln=True)
         pdf.set_font("Arial", '', 10)
-        day_shifts = df[df['Data'] == day]
-        for _, row in day_shifts.sort_values(by=["Stanowisko"]).iterrows():
-            name = row['Pracownik_Imie'] if row['Pracownik_Imie'] else "---"
-            line = f"{row['Stanowisko']} | {row['Godziny']} | {name}"
+        day_shifts = df[df['date'] == day]
+        for _, row in day_shifts.sort_values(by=["role"]).iterrows():
+            name = row['employee_name'] if row['employee_name'] else "---"
+            line = f"{row['role']} | {row['hours']} | {name}"
             pdf.cell(0, 8, clean_text(line), ln=True, border=1)
         pdf.ln(5)
     return pdf.output(dest='S').encode('latin-1')
 
+# --- INICJALIZACJA ---
+init_db()
 
-# --- INICJALIZACJA STANU ---
-if 'db_users' not in st.session_state:
-    st.session_state.db_users = load_json(
-        'db_users.json',
-        {"admin": {"pass": "admin123", "role": "manager", "name": "Kierownik"}}
-    )
-if 'db_employees' not in st.session_state:
-    default_employees = []
-    st.session_state.db_employees = load_json('db_employees.json', default_employees)
-if 'db_shifts' not in st.session_state:
-    st.session_state.db_shifts = load_json('db_shifts.json', [])
-if 'db_avail' not in st.session_state:
-    st.session_state.db_avail = load_json('db_avail.json', {})
-if 'db_logs' not in st.session_state:
-    st.session_state.db_logs = load_json('db_logs.json', [])
-if 'db_inbox' not in st.session_state:
-    st.session_state.db_inbox = load_json('db_inbox.json', {})
-
-# --- GLOBALNY SYNCHRONIZATOR DATY ---
+# Global date sync
 if 'active_week_start' not in st.session_state:
-    # Ustawiamy domyślnie na najbliższy piątek
     today = datetime.now().date()
     days_ahead = 4 - today.weekday()
-    if days_ahead <= 0:
-        days_ahead += 7
+    if days_ahead <= 0: days_ahead += 7
     if today.weekday() == 4:
         st.session_state.active_week_start = today
     else:
         st.session_state.active_week_start = today + timedelta(days=days_ahead)
 
-# --- DOMYŚLNI PRACOWNICY (jeśli pusto) ---
-if not st.session_state.db_employees:
+# Domyślne dane pracowników (jeśli baza pusta)
+conn = get_db_connection()
+if conn.cursor().execute("SELECT count(*) FROM employees").fetchone()[0] == 0:
     raw_data = [
         {"Imie": "Julia Bąk", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"], "Plec": "K"},
         {"Imie": "Kacper Borzechowski", "Role": ["Bar", "Obsługa", "Plakaty (Techniczne)"], "Plec": "M"},
         {"Imie": "Wiktor Buc", "Role": ["Obsługa"], "Plec": "M"},
         {"Imie": "Anna Dubińska", "Role": ["Bar", "Obsługa"], "Plec": "K"},
-        {"Imie": "Julia Fidor", "Role": ["Bar", "Obsługa"], "Plec": "K"},
-        {"Imie": "Julia Głowacka", "Role": ["Cafe", "Bar", "Obsługa"], "Plec": "K"},
-        {"Imie": "Martyna Grela", "Role": ["Bar", "Obsługa"], "Plec": "K"},
-        {"Imie": "Weronika Jabłońska", "Role": ["Bar", "Obsługa"], "Plec": "K"},
         {"Imie": "Jarosław Kaca", "Role": ["Bar", "Obsługa"], "Plec": "M"},
-        {"Imie": "Michał Kowalczyk", "Role": ["Obsługa"], "Plec": "M"},
-        {"Imie": "Dominik Mleczkowski", "Role": ["Cafe", "Bar", "Obsługa"], "Plec": "M"},
-        {"Imie": "Aleksandra Pacek", "Role": ["Cafe", "Bar", "Obsługa"], "Plec": "K"},
-        {"Imie": "Paweł Pod", "Role": ["Obsługa"], "Plec": "M"},
-        {"Imie": "Aleksander Prus", "Role": ["Obsługa"], "Plec": "M"},
-        {"Imie": "Julia Pyrka", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"], "Plec": "K"},
-        {"Imie": "Wiktoria Siara", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"], "Plec": "K"},
-        {"Imie": "Damian Siwak", "Role": ["Obsługa"], "Plec": "M"},
-        {"Imie": "Katarzyna Stanisławska", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"], "Plec": "K"},
-        {"Imie": "Patryk Szczodry", "Role": ["Obsługa"], "Plec": "M"},
-        {"Imie": "Anna Szymańska", "Role": ["Bar", "Obsługa"], "Plec": "K"},
-        {"Imie": "Hubert War", "Role": ["Bar", "Obsługa", "Plakaty (Techniczne)"], "Plec": "M"},
-        {"Imie": "Marysia Wojtysiak", "Role": ["Cafe", "Bar", "Obsługa"], "Plec": "K"},
-        {"Imie": "Michał Wojtysiak", "Role": ["Obsługa"], "Plec": "M"},
-        {"Imie": "Weronika Ziętkowska", "Role": ["Cafe", "Bar", "Obsługa"], "Plec": "K"},
-        {"Imie": "Magda Żurowska", "Role": ["Bar", "Obsługa"], "Plec": "K"}
     ]
-    raw_data.sort(key=lambda x: polish_sort_key(x['Imie'].split()[-1]))
-    rows = []
-    for i, p in enumerate(raw_data):
-        rows.append({
-            "ID": i + 1,
-            "Imie": p["Imie"],
-            "Role": p["Role"],
-            "Plec": p["Plec"],
-            "Auto": calculate_auto_roles(p["Role"])
-        })
-    st.session_state.db_employees = rows
-    if "julia" not in st.session_state.db_users:
-        st.session_state.db_users["julia"] = {
-            "pass": "julia1",
-            "role": "worker",
-            "name": "Julia Bąk"
-        }
-    save_all()
+    for p in raw_data:
+        auto = calculate_auto_roles(p["Role"])
+        conn.execute("INSERT INTO employees (name, roles, gender, auto_roles) VALUES (?, ?, ?, ?)",
+                     (p["Imie"], str(p["Role"]), p["Plec"], str(auto)))
+    conn.commit()
+    # Demo użytkownik
+    create_user_if_not_exists("julia", "julia1", "worker", "Julia Bąk")
+conn.close()
+
 
 # ==========================================
 # LOGOWANIE
@@ -397,11 +405,12 @@ if 'logged_in' not in st.session_state:
 if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
-        st.markdown("<h1 style='text-align: center; color: #d93025;'>ETHER SYSTEM</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align: center; color: #d93025;'>ETHER SYSTEM v2</h1>", unsafe_allow_html=True)
+        st.info("System korzysta teraz z bezpiecznej bazy SQLite.")
         u = st.text_input("Login")
         p = st.text_input("Hasło", type="password")
         if st.button("ZALOGUJ"):
-            user_data = check_login(u, p)
+            user_data = check_login_db(u, p)
             if user_data:
                 st.session_state.logged_in = True
                 st.session_state.user_role = user_data["role"]
@@ -409,7 +418,7 @@ if not st.session_state.logged_in:
                 st.session_state.user_login = u
                 st.rerun()
             else:
-                st.error("Błąd.")
+                st.error("Błędny login lub hasło.")
     st.stop()
 
 # ==========================================
@@ -425,46 +434,29 @@ if st.session_state.user_role == "worker":
             st.session_state.logged_in = False
             st.rerun()
 
-    my_msgs = st.session_state.db_inbox.get(st.session_state.user_login, [])
-    if my_msgs:
-        with st.expander(f"🔔 Masz powiadomienia ({len(my_msgs)})", expanded=True):
-            for m in my_msgs:
-                st.markdown(f"<div class='notification-box'>{m}</div>", unsafe_allow_html=True)
+    conn = get_db_connection()
+    msgs = conn.execute("SELECT id, message FROM inbox WHERE user_login=? ORDER BY id DESC", (st.session_state.user_login,)).fetchall()
+    if msgs:
+        with st.expander(f"🔔 Masz powiadomienia ({len(msgs)})", expanded=True):
+            for mid, mtext in msgs:
+                st.markdown(f"<div class='notification-box'>{mtext}</div>", unsafe_allow_html=True)
             if st.button("Wyczyść"):
-                st.session_state.db_inbox[st.session_state.user_login] = []
-                save_all()
+                conn.execute("DELETE FROM inbox WHERE user_login=?", (st.session_state.user_login,))
+                conn.commit()
                 st.rerun()
+    conn.close()
 
     if menu == "📅 Mój Grafik":
         st.title("Mój Grafik")
-        df = pd.DataFrame(st.session_state.db_shifts)
-        if not df.empty:
-            my = df[df['Pracownik_Imie'] == st.session_state.user_name]
-            if not my.empty:
-                st.dataframe(my[["Data", "Stanowisko", "Godziny"]], use_container_width=True)
-                st.write("---")
-                st.subheader("🔄 Giełda Zmian")
-                shift_to_swap = st.selectbox("Oddaj zmianę:", my['Data'].astype(str) + " | " + my['Stanowisko'])
-                if st.button("Szukaj zastępstwa"):
-                    s_date, s_role = shift_to_swap.split(" | ")
-                    role_base = s_role.replace(" 1", "").replace(" 2", "")
-                    found = []
-                    for emp in st.session_state.db_employees:
-                        if emp['Imie'] == st.session_state.user_name:
-                            continue
-                        if role_base in emp['Role'] or role_base in emp['Auto']:
-                            key = f"{emp['Imie']}_{s_date}"
-                            avail = st.session_state.db_avail.get(key, "")
-                            if len(avail) > 2:
-                                found.append(f"{emp['Imie']} ({avail})")
-                    if found:
-                        st.success(f"Zapytaj: {', '.join(found)}")
-                    else:
-                        st.error("Brak chętnych.")
-            else:
-                st.info("Brak zmian.")
+        conn = get_db_connection()
+        my_shifts = pd.read_sql_query("SELECT date as Data, role as Stanowisko, hours as Godziny FROM shifts WHERE employee_name=?", conn, params=(st.session_state.user_name,))
+        conn.close()
+        
+        if not my_shifts.empty:
+            st.dataframe(my_shifts, use_container_width=True)
+            st.info("Aby zamienić zmianę, skontaktuj się z kierownikiem lub znajdź zastępstwo na grupie.")
         else:
-            st.info("Brak grafiku.")
+            st.info("Brak nadchodzących zmian.")
 
     elif menu == "✍️ Moja Dyspozycyjność":
         st.title("Moja Dyspozycyjność")
@@ -478,66 +470,61 @@ if st.session_state.user_role == "worker":
         days = [start_d + timedelta(days=i) for i in range(7)]
         day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
 
-        st.info(f"Wpisujesz dla tygodnia: **{start_d.strftime('%d.%m')} - {(start_d + timedelta(days=6)).strftime('%d.%m')}**")
-        st.caption("Format: `8-16`, `16-1`, `-` gdy nie możesz. Możesz podać kilka przedziałów, np. `8-12/16-1`.")
-
+        st.info(f"Tydzień: **{start_d.strftime('%d.%m')} - {(start_d + timedelta(days=6)).strftime('%d.%m')}**")
+        
         with st.form("worker_avail"):
             cols = st.columns(7)
+            current_avails = {}
             for i, d in enumerate(days):
                 cols[i].write(f"**{day_names[i]}** {d.strftime('%d.%m')}")
-                key = f"{st.session_state.user_name}_{d.strftime('%Y-%m-%d')}"
-                val = st.session_state.db_avail.get(key, "")
-                new_val = cols[i].text_input("h", val, key=f"w_{key}", disabled=is_locked, label_visibility="collapsed")
-                if not is_locked:
-                    st.session_state.db_avail[key] = new_val
+                val = get_avail_db(st.session_state.user_name, d.strftime('%Y-%m-%d'))
+                new_val = cols[i].text_input("h", val, key=f"av_{i}", disabled=is_locked, label_visibility="collapsed")
+                current_avails[d.strftime('%Y-%m-%d')] = new_val
+            
             if st.form_submit_button("Zapisz", disabled=is_locked):
-                save_all()
-                st.toast("Zapisano!", icon="✅")
+                for d_str, v in current_avails.items():
+                    save_avail_db(st.session_state.user_name, d_str, v)
+                st.toast("Zapisano w bazie!", icon="✅")
 
         st.write("---")
         st.subheader("👀 Podgląd Zespołu")
         with st.expander("Kto kiedy może?"):
+            conn = get_db_connection()
+            all_emps = [r[0] for r in conn.execute("SELECT name FROM employees ORDER BY name").fetchall()]
             avail_data = []
-            for emp in st.session_state.db_employees:
-                row = {"Pracownik": emp['Imie']}
+            for emp_name in all_emps:
+                row = {"Pracownik": emp_name}
                 has_val = False
                 for d in days:
-                    k = f"{emp['Imie']}_{d.strftime('%Y-%m-%d')}"
-                    v = st.session_state.db_avail.get(k, "")
-                    if v:
-                        has_val = True
+                    v = get_avail_db(emp_name, d.strftime('%Y-%m-%d'))
+                    if v: has_val = True
                     row[d.strftime('%a')] = v
-                if has_val:
-                    avail_data.append(row)
+                if has_val: avail_data.append(row)
+            conn.close()
             if avail_data:
                 st.dataframe(pd.DataFrame(avail_data))
 
     elif menu == "⏱️ Karta Czasu":
         st.title("Ewidencja")
-        df_shifts = pd.DataFrame(st.session_state.db_shifts)
-        my_shifts = pd.DataFrame()
-        if not df_shifts.empty:
-            my_shifts = df_shifts[df_shifts['Pracownik_Imie'] == st.session_state.user_name]
-
+        conn = get_db_connection()
+        my_shifts = pd.read_sql_query("SELECT date, role, hours FROM shifts WHERE employee_name=?", conn, params=(st.session_state.user_name,))
+        
         if my_shifts.empty:
-            st.warning("Brak zmian w grafiku.")
+            st.warning("Brak zmian.")
         else:
-            opts = my_shifts.apply(
-                lambda x: f"{x['Data']} | {x['Stanowisko']} ({x['Godziny']})",
-                axis=1
-            ).tolist()
+            opts = my_shifts.apply(lambda x: f"{x['date']} | {x['role']} ({x['hours']})", axis=1).tolist()
             with st.container():
                 st.markdown("<div class='timesheet-card'>", unsafe_allow_html=True)
                 sel = st.selectbox("Wybierz zmianę:", opts)
-
+                
+                # Auto-uzupełnianie godzin
                 def_s, def_e = time(16, 0), time(0, 0)
                 try:
                     hp = sel.split("(")[1].replace(")", "")
                     s, e = hp.split("-")
                     def_s = datetime.strptime(s, "%H:%M").time()
                     def_e = datetime.strptime(e, "%H:%M").time()
-                except Exception:
-                    pass
+                except: pass
 
                 c1, c2, c3 = st.columns(3)
                 c1.text_input("Data", value=sel.split(" | ")[0], disabled=True)
@@ -548,34 +535,23 @@ if st.session_state.user_role == "worker":
                     ld = datetime.strptime(sel.split(" | ")[0], "%Y-%m-%d").date()
                     dt1 = datetime.combine(ld, ls)
                     dt2 = datetime.combine(ld, le)
-                    if dt2 < dt1:
-                        dt2 += timedelta(days=1)
+                    if dt2 < dt1: dt2 += timedelta(days=1)
                     h = (dt2 - dt1).total_seconds() / 3600
-                    st.session_state.db_logs.append({
-                        "Pracownik": st.session_state.user_name,
-                        "Data": str(ld),
-                        "Start": str(ls),
-                        "Koniec": str(le),
-                        "Godziny": round(h, 2)
-                    })
-                    save_all()
+                    
+                    conn.execute("INSERT INTO logs (employee, date, start, end, hours) VALUES (?, ?, ?, ?, ?)",
+                                 (st.session_state.user_name, str(ld), str(ls), str(le), round(h, 2)))
+                    conn.commit()
                     st.success("Dodano!")
                     st.rerun()
-
                 st.markdown("</div>", unsafe_allow_html=True)
-
+                
             st.divider()
-            df_logs = pd.DataFrame(st.session_state.db_logs)
-            if not df_logs.empty:
-                my_logs_view = df_logs[df_logs['Pracownik'] == st.session_state.user_name]
-                if not my_logs_view.empty:
-                    total = my_logs_view['Godziny'].sum()
-                    st.markdown(
-                        f"<div class='wallet-card'><div>Szacunkowy zarobek:</div>"
-                        f"<div class='wallet-amount'>{total * HOURLY_RATE:.2f} PLN</div></div>",
-                        unsafe_allow_html=True
-                    )
-                    st.dataframe(my_logs_view, use_container_width=True)
+            logs = pd.read_sql_query("SELECT date, start, end, hours FROM logs WHERE employee=?", conn, params=(st.session_state.user_name,))
+            if not logs.empty:
+                total = logs['hours'].sum()
+                st.markdown(f"<div class='wallet-card'><div>Zarobek:</div><div class='wallet-amount'>{total * HOURLY_RATE:.2f} PLN</div></div>", unsafe_allow_html=True)
+                st.dataframe(logs, use_container_width=True)
+        conn.close()
 
 # ==========================================
 # PANEL MENEDŻERA
@@ -588,36 +564,33 @@ elif st.session_state.user_role == "manager":
             st.session_state.logged_in = False
             st.rerun()
 
-    # --- AUTO-PLANER ---
     if menu == "Auto-Planer (LOGISTIC)":
-        st.title("🚀 Generator Logistyczny")
+        st.title("🚀 Generator Logistyczny V2")
+        st.caption("Algorytm uwzględnia: Dostępność, Kompetencje, Równomierny podział, Zasadę 11h")
+        
         today = datetime.now().date()
         days_ahead = 4 - today.weekday()
-        if days_ahead <= 0:
-            days_ahead += 7
+        if days_ahead <= 0: days_ahead += 7
         next_friday = today + timedelta(days=days_ahead)
-        if today.weekday() == 4:
-            next_friday = today
+        if today.weekday() == 4: next_friday = today
 
         with st.container(border=True):
             week_start = st.date_input("Start (Piątek):", next_friday, min_value=today)
             if week_start.weekday() != 4:
-                st.error("⛔ Wybierz PIĄTEK! (grafik liczony jest piątek–czwartek)")
+                st.error("⛔ Wybierz PIĄTEK!")
             else:
                 st.session_state.active_week_start = week_start
 
-        # Reszta logiki tylko, jeśli wybrany dzień to piątek
         if week_start.weekday() == 4:
-            preload_demo_data(week_start)
             week_days = [week_start + timedelta(days=i) for i in range(7)]
             week_config = []
-
+            
             tabs = st.tabs([f"{d.strftime('%d.%m')}" for d in week_days])
             for i, tab in enumerate(tabs):
                 with tab:
                     with st.container(border=True):
                         c1, c2, c3 = st.columns(3)
-                        s1 = c1.time_input(f"1. Film", time(9, 0), key=f"s1_{i}")
+                        s1 = c1.time_input(f"Film", time(9, 0), key=f"s1_{i}")
                         sl = c2.time_input(f"Start Ost.", time(21, 0), key=f"sl_{i}")
                         el = c3.time_input(f"Koniec Ost.", time(0, 0), key=f"el_{i}")
                         st.write("---")
@@ -628,107 +601,81 @@ elif st.session_state.user_role == "manager":
                         c = c4.selectbox("CAFE", [0, 1, 2], index=1, key=f"c_{i}")
                         om = c5.selectbox("OBS RANO", [1, 2, 3], index=1, key=f"om_{i}")
                         oe = c6.selectbox("OBS NOC", [1, 2, 3, 4], index=2, key=f"oe_{i}")
-                    week_config.append({
-                        "date": week_days[i],
-                        "times": (s1, sl, el),
-                        "counts": (k, b1, b2, c, om, oe)
-                    })
+                        week_config.append({"date": week_days[i], "times": (s1, sl, el), "counts": (k, b1, b2, c, om, oe)})
 
-            if st.button("⚡ GENERUJ", type="primary"):
-                current_shifts = st.session_state.db_shifts
-                start_s = str(week_days[0])
-                end_s = str(week_days[-1])
-                st.session_state.db_shifts = [
-                    s for s in current_shifts
-                    if not (start_s <= s['Data'] <= end_s)
-                ]
+            if st.button("⚡ GENERUJ GRAFIK", type="primary"):
+                conn = get_db_connection()
+                # Usuń stare zmiany z tego zakresu
+                start_s, end_s = str(week_days[0]), str(week_days[-1])
+                conn.execute("DELETE FROM shifts WHERE date >= ? AND date <= ?", (start_s, end_s))
+                conn.commit()
 
-                shift_counts = {emp['Imie']: 0 for emp in st.session_state.db_employees}
+                # Inicjalizacja liczników
+                all_emps = [r[0] for r in conn.execute("SELECT name FROM employees").fetchall()]
+                shift_counts = {name: 0 for name in all_emps}
+                
                 cnt = 0
-
                 for cfg in week_config:
                     d_obj = cfg['date']
                     s1, sl, el = cfg['times']
-                    k, b1, b2, c, om, oe = cfg['counts']
-
+                    k, b1, b2, c_role, om, oe = cfg['counts']
+                    
                     start = (datetime.combine(d_obj, s1) - timedelta(minutes=45)).strftime("%H:%M")
                     bar_end = (datetime.combine(d_obj, sl) + timedelta(minutes=15)).strftime("%H:%M")
                     obs_end = (datetime.combine(d_obj, el) + timedelta(minutes=15)).strftime("%H:%M")
                     split = "16:00"
 
                     tasks = []
-                    for _ in range(k):
-                        tasks.append(("Kasa", "morning", start, split))
-                        tasks.append(("Kasa", "evening", split, bar_end))
-                    for _ in range(b1):
-                        tasks.append(("Bar 1", "morning", start, split))
-                        tasks.append(("Bar 1", "evening", split, bar_end))
-                    for _ in range(b2):
-                        tasks.append(("Bar 2", "morning", start, split))
-                        tasks.append(("Bar 2", "evening", split, bar_end))
-                    for _ in range(c):
-                        tasks.append(("Cafe", "morning", start, split))
-                        tasks.append(("Cafe", "evening", split, bar_end))
-                    for _ in range(om):
-                        tasks.append(("Obsługa", "morning", start, split))
-                    for _ in range(oe):
-                        tasks.append(("Obsługa", "evening", split, obs_end))
+                    for _ in range(k): tasks.extend([("Kasa", "morning", start, split), ("Kasa", "evening", split, bar_end)])
+                    for _ in range(b1): tasks.extend([("Bar 1", "morning", start, split), ("Bar 1", "evening", split, bar_end)])
+                    for _ in range(b2): tasks.extend([("Bar 2", "morning", start, split), ("Bar 2", "evening", split, bar_end)])
+                    for _ in range(c_role): tasks.extend([("Cafe", "morning", start, split), ("Cafe", "evening", split, bar_end)])
+                    for _ in range(om): tasks.append(("Obsługa", "morning", start, split))
+                    for _ in range(oe): tasks.append(("Obsługa", "evening", split, obs_end))
 
-                    assigned_today = {'morning': [], 'evening': []}
+                    assigned_today = []
+                    
                     for role, t_type, s, e in tasks:
-                        worker_name = find_worker_for_shift(
-                            role, t_type, d_obj,
-                            st.session_state.db_employees,
-                            st.session_state.db_avail,
-                            assigned_today,
-                            shift_counts
-                        )
-                        final = worker_name if worker_name is not None else ""
-                        st.session_state.db_shifts.append({
-                            "Data": str(d_obj),
-                            "Stanowisko": role,
-                            "Godziny": f"{s}-{e}",
-                            "Pracownik_Imie": final,
-                            "Typ": "Auto"
-                        })
-                        if worker_name is not None:
-                            assigned_today[t_type].append(worker_name)
+                        worker_name = find_worker_for_shift_db(role, t_type, d_obj, assigned_today, shift_counts)
+                        final = worker_name if worker_name else "WAKAT"
+                        
+                        conn.execute("INSERT INTO shifts (date, role, hours, employee_name, type) VALUES (?, ?, ?, ?, ?)",
+                                     (str(d_obj), role, f"{s}-{e}", final, "Auto"))
+                        
+                        if worker_name:
+                            assigned_today.append(worker_name)
                             shift_counts[worker_name] += 1
                         cnt += 1
+                
+                conn.commit()
+                # Powiadomienia
+                users = conn.execute("SELECT login FROM users WHERE role='worker'").fetchall()
+                for u_login in users:
+                    send_notification_db(u_login[0], f"Nowy grafik na tydzień {week_start.strftime('%d.%m')}!")
+                
+                conn.close()
+                st.success(f"Wygenerowano {cnt} zmian! Baza zaktualizowana.")
 
-                for user_login in st.session_state.db_users:
-                    if st.session_state.db_users[user_login]['role'] == 'worker':
-                        send_notification(
-                            user_login,
-                            f"Grafik na tydzień {week_start.strftime('%d.%m')} gotowy!"
-                        )
-
-                save_all()
-                st.success(f"Wygenerowano {cnt} zmian!")
-
-    # --- DYSPOZYCJE PODGLĄD ---
     elif menu == "Dyspozycje (Podgląd)":
         st.title("📥 Dyspozycje")
         d_start = st.session_state.active_week_start
-        st.info(f"Podgląd dla tygodnia: {d_start.strftime('%d.%m')} - {(d_start + timedelta(days=6)).strftime('%d.%m')}")
         days = [d_start + timedelta(days=i) for i in range(7)]
-        day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
-        cols = st.columns([2] + [1] * 7)
-        cols[0].write("**Pracownik**")
-        for i, d in enumerate(days):
-            cols[i + 1].write(f"**{day_names[i]}**")
-        st.divider()
-        for emp in st.session_state.db_employees:
-            r_cols = st.columns([2] + [1] * 7)
-            r_cols[0].write(f"{emp['Imie']}")
-            for i, d in enumerate(days):
-                key = f"{emp['Imie']}_{d.strftime('%Y-%m-%d')}"
-                val = st.session_state.db_avail.get(key, "-")
-                r_cols[i + 1].write(val)
+        
+        conn = get_db_connection()
+        emps = conn.execute("SELECT name FROM employees ORDER BY name").fetchall()
+        
+        data = []
+        for emp in emps:
+            row = {"Pracownik": emp[0]}
+            for d in days:
+                row[d.strftime('%a')] = get_avail_db(emp[0], d.strftime('%Y-%m-%d'))
+            data.append(row)
+        conn.close()
+        
+        st.dataframe(pd.DataFrame(data))
 
-    # --- KADRY ---
     elif menu == "Kadry (Edycja)":
-        st.title("📇 Kadry i Konta")
+        st.title("📇 Kadry")
         with st.expander("➕ Dodaj Pracownika i Konto"):
             with st.form("add_user"):
                 u_name = st.text_input("Imię i Nazwisko")
@@ -737,120 +684,79 @@ elif st.session_state.user_role == "manager":
                 u_roles = st.multiselect("Role", ["Obsługa", "Bar", "Kasa", "Cafe"])
                 u_plec = st.selectbox("Płeć", ["K", "M"])
                 if st.form_submit_button("Utwórz"):
-                    st.session_state.db_users[u_login] = {
-                        "pass": u_pass,
-                        "role": "worker",
-                        "name": u_name
-                    }
-                    auto = calculate_auto_roles(u_roles)
-                    st.session_state.db_employees.append({
-                        "ID": len(st.session_state.db_employees) + 1,
-                        "Imie": u_name,
-                        "Role": u_roles,
-                        "Plec": u_plec,
-                        "Auto": auto
-                    })
-                    save_all()
-                    st.success("Konto utworzone!")
-                    st.rerun()
+                    conn = get_db_connection()
+                    try:
+                        conn.execute("INSERT INTO users (login, password_hash, role, name) VALUES (?, ?, ?, ?)",
+                                     (u_login, hash_password(u_pass), "worker", u_name))
+                        auto = calculate_auto_roles(u_roles)
+                        conn.execute("INSERT INTO employees (name, roles, gender, auto_roles) VALUES (?, ?, ?, ?)",
+                                     (u_name, str(u_roles), u_plec, str(auto)))
+                        conn.commit()
+                        st.success("Dodano!")
+                    except Exception as e:
+                        st.error(f"Błąd: {e}")
+                    conn.close()
 
         st.write("---")
-        users_data = []
-        for login, data in st.session_state.db_users.items():
-            users_data.append({
-                "Login": login,
-                "Imię": data["name"],
-                "Rola": data["role"]
-            })
-        st.dataframe(pd.DataFrame(users_data))
+        conn = get_db_connection()
+        users = pd.read_sql_query("SELECT login, name, role FROM users", conn)
+        conn.close()
+        st.dataframe(users)
 
-    # --- GRAFIK WIZUALNY ---
     elif menu == "Grafik (WIZUALNY)":
         st.title("📋 Grafik")
         tab_g, tab_s = st.tabs(["Grafik", "📊 Statystyki"])
-
         d_start = st.session_state.active_week_start
         d_end = d_start + timedelta(days=6)
 
-        df = pd.DataFrame(st.session_state.db_shifts)
+        conn = get_db_connection()
+        df = pd.read_sql_query("SELECT * FROM shifts", conn)
+        conn.close()
+
         if not df.empty:
-            df['DataObj'] = pd.to_datetime(df['Data']).dt.date
-            mask = (df['DataObj'] >= d_start) & (df['DataObj'] <= d_end)
-            df_view = df.loc[mask]
+            df['DataObj'] = pd.to_datetime(df['date']).dt.date
+            df_view = df[(df['DataObj'] >= d_start) & (df['DataObj'] <= d_end)].copy()
         else:
             df_view = pd.DataFrame()
 
         with tab_g:
-            # wybór tygodnia z opcją zmiany
-            new_start = st.date_input(
-                "Tydzień (start – PIĄTEK):",
-                d_start
-            )
-            if new_start.weekday() != 4:
-                st.warning("Grafik liczony jest piątek–czwartek. Wybierz piątek, aby przełączyć tydzień.")
-            else:
-                if new_start != d_start:
-                    st.session_state.active_week_start = new_start
-                    st.rerun()
+            new_start = st.date_input("Tydzień (PIĄTEK):", d_start)
+            if new_start != d_start and new_start.weekday() == 4:
+                st.session_state.active_week_start = new_start
+                st.rerun()
 
             if not df_view.empty:
-        components.html(
-            render_html_schedule(df_view, d_start),
-            height=600,
-            scrolling=True
-        )
-        st.write("---")
-        if st.button("🖨️ PDF"):
+                st.markdown(render_html_schedule(df_view, d_start), unsafe_allow_html=True)
+                
+                c1, c2 = st.columns(2)
+                if c1.button("🖨️ PDF"):
                     pdf = generate_schedule_pdf(df_view, f"GRAFIK {d_start}")
-                    st.download_button("Pobierz PDF", pdf, "grafik.pdf", "application/pdf")
-
-                # CSV eksport
-                csv = df_view.to_csv(index=False).encode('utf-8-sig')
-                st.download_button("📥 Eksport grafik (CSV)", csv, "grafik.csv", "text/csv")
-
+                    st.download_button("Pobierz", pdf, "grafik.pdf", "application/pdf")
+                
                 st.write("---")
                 st.subheader("🛠️ Szybka Korekta")
-                df_view = df_view.copy()
-                df_view['Label'] = df_view.apply(
-                    lambda x: f"{x['Data']} | {x['Stanowisko']} | {x['Pracownik_Imie']}",
-                    axis=1
-                )
-                shift_list = df_view['Label'].tolist()
+                opts = df_view.apply(lambda x: f"{x['id']}: {x['date']} | {x['role']} | {x['employee_name']}", axis=1).tolist()
+                
                 c1, c2 = st.columns([3, 1])
-                if shift_list:
-                    target_shift = c1.selectbox("Zmiana:", shift_list)
-                    new_person = c2.selectbox("Nowa osoba:", ["WAKAT"] + [e['Imie'] for e in st.session_state.db_employees])
-                    if st.button("Zmień"):
-                        t_date, t_role, t_curr = target_shift.split(" | ")
-                        for s in st.session_state.db_shifts:
-                            if s['Data'] == t_date and s['Stanowisko'] == t_role and s['Pracownik_Imie'] == t_curr:
-                                s['Pracownik_Imie'] = "" if new_person == "WAKAT" else new_person
-                                break
-                        save_all()
+                if opts:
+                    sel = c1.selectbox("Wybierz zmianę:", opts)
+                    conn = get_db_connection()
+                    emps = [r[0] for r in conn.execute("SELECT name FROM employees").fetchall()]
+                    conn.close()
+                    new_p = c2.selectbox("Nowa osoba:", ["WAKAT"] + emps)
+                    
+                    if st.button("Zapisz zmianę"):
+                        sid = sel.split(":")[0]
+                        conn = get_db_connection()
+                        conn.execute("UPDATE shifts SET employee_name=? WHERE id=?", (new_p, sid))
+                        conn.commit()
+                        conn.close()
                         st.rerun()
-            else:
-                st.info("Brak zmian w tym tygodniu.")
 
         with tab_s:
-            st.subheader("📊 Obciążenie zmianami")
             if not df_view.empty:
-                real = df_view[df_view['Pracownik_Imie'].str.len() > 2]
-                if not real.empty:
-                    counts = real['Pracownik_Imie'].value_counts().reset_index()
-                    counts.columns = ["Pracownik", "Liczba Zmian"]
-                    st.bar_chart(counts.set_index("Pracownik"))
-                    st.dataframe(counts)
-
-            st.write("---")
-            st.subheader("⏱️ Godziny z kart czasu (tydzień)")
-            df_logs = pd.DataFrame(st.session_state.db_logs)
-            if not df_logs.empty:
-                df_logs['DataObj'] = pd.to_datetime(df_logs['Data']).dt.date
-                mask_logs = (df_logs['DataObj'] >= d_start) & (df_logs['DataObj'] <= d_end)
-                week_logs = df_logs.loc[mask_logs]
-                if not week_logs.empty:
-                    summary = week_logs.groupby("Pracownik")['Godziny'].sum().reset_index()
-                    summary['Szacunkowo [PLN]'] = summary['Godziny'] * HOURLY_RATE
-                    st.dataframe(summary, use_container_width=True)
-
-
+                real = df_view[df_view['employee_name'] != "WAKAT"]
+                counts = real['employee_name'].value_counts().reset_index()
+                counts.columns = ["Pracownik", "Liczba Zmian"]
+                st.bar_chart(counts.set_index("Pracownik"))
+                st.dataframe(counts)
