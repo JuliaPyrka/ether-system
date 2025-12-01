@@ -975,8 +975,8 @@ elif st.session_state.user_role == "manager":
                     f"Sukces! Wygenerowano {cnt} zmian zgodnie z nową konfiguracją."
                 )
 
-    # --- DYSPOZYCJE (PODGLĄD + EDYCJA KIEROWNIKA) ---
-       elif menu == "Dyspozycje (Podgląd)":
+   # --- DYSPOZYCJE (PODGLĄD + EDYCJA KIEROWNIKA) ---
+    elif menu == "Dyspozycje (Podgląd)":
         st.title("📥 Dyspozycje")
 
         # Sterowanie tygodniami (strzałki)
@@ -1224,4 +1224,5 @@ elif st.session_state.user_role == "manager":
                 counts.columns = ["Pracownik", "Liczba Zmian"]
                 st.bar_chart(counts.set_index("Pracownik"))
                 st.dataframe(counts)
+
 
