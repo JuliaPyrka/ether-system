@@ -7,6 +7,8 @@ import re
 import os
 import sqlite3
 import hashlib
+import streamlit.components.v1 as components
+
 
 # --- KONFIGURACJA ---
 st.set_page_config(page_title="ETHER | SYNC MASTER", layout="wide")
@@ -726,7 +728,11 @@ elif st.session_state.user_role == "manager":
                 st.rerun()
 
             if not df_view.empty:
-                st.markdown(render_html_schedule(df_view, d_start), unsafe_allow_html=True)
+            components.html(
+                render_html_schedule(df_view, d_start),
+                height=600,
+                scrolling=True
+            )
                 
                 c1, c2 = st.columns(2)
                 if c1.button("🖨️ PDF"):
@@ -760,3 +766,4 @@ elif st.session_state.user_role == "manager":
                 counts.columns = ["Pracownik", "Liczba Zmian"]
                 st.bar_chart(counts.set_index("Pracownik"))
                 st.dataframe(counts)
+
