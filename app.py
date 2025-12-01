@@ -180,6 +180,45 @@ def save_avail_db(name, date_str, val):
     conn.commit()
     conn.close()
 
+def get_candidates_for_shift(date_obj, role_needed, shift_time_str):
+    """
+    Zwraca listę pracowników dostępnych na daną zmianę.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # Rozpoznanie typu zmiany (morning/evening) na podstawie godziny startu
+    try:
+        start_h = int(shift_time_str.split("-")[0].split(":")[0])
+        t_type = "morning" if start_h < 15 else "evening"
+    except:
+        t_type = "morning" # fallback
+
+    # Pobierz pracowników
+    c.execute("SELECT name, roles, gender, auto_roles FROM employees")
+    all_emps = []
+    for row in c.fetchall():
+        all_emps.append({"Imie": row[0], "Role": row[1], "Plec": row[2], "Auto": row[3]})
+    
+    candidates = []
+    date_str = date_obj.strftime('%Y-%m-%d')
+
+    for emp in all_emps:
+        # 1. Kompetencje
+        role_base = role_needed.replace(" 1", "").replace(" 2", "")
+        if role_base not in emp['Role'] and role_base not in emp['Auto']:
+            continue
+        
+        # 2. Dostępność
+        avail = get_avail_db(emp['Imie'], date_str)
+        if is_avail_compatible(avail, t_type):
+            # 3. Reguła 11h
+            if check_11h_rule(emp['Imie'], date_obj, t_type, conn):
+                candidates.append(emp['Imie'])
+    
+    conn.close()
+    return candidates
+
 # --- ALGORYTMY GRAFIKOWE (UPGRADE) ---
 
 def is_avail_compatible(avail_str, shift_type):
@@ -330,8 +369,17 @@ def render_html_schedule(df, start_date):
                 current_shifts = df[(df['Data_Obj'] == d) & (df['role'].str.contains(role, regex=False))]
                 for _, row in current_shifts.iterrows():
                     emp_name = row['employee_name']
+                    # === TUTAJ JEST ZMIANA - LINKI ===
                     if not emp_name or emp_name == "WAKAT":
-                        cell_content += f'<div class="empty-shift-box"><span class="empty-time">{row["hours"]}</span></div>'
+                        # Tworzymy link z parametrem edit_id
+                        link = f"/?edit_id={row['id']}"
+                        cell_content += f'''
+                        <a href="{link}" target="_self" style="text-decoration: none;">
+                            <div class="empty-shift-box">
+                                <span class="empty-time">{row["hours"]}</span>
+                            </div>
+                        </a>
+                        '''
                     else:
                         display_pos = "(Combo)" if "+" in row['role'] else ""
                         parts = emp_name.split(" ")
@@ -753,6 +801,57 @@ elif st.session_state.user_role == "manager":
         st.dataframe(users)
 
     elif menu == "Grafik (WIZUALNY)":
+        
+        # --- OBSŁUGA KLIKNIĘCIA W WAKAT (MODAL) ---
+        @st.dialog("⚡ Uzupełnij Wakat")
+        def edit_shift_dialog(shift_id):
+            conn = get_db_connection()
+            s_data = conn.execute("SELECT date, role, hours FROM shifts WHERE id=?", (shift_id,)).fetchone()
+            conn.close()
+            
+            if s_data:
+                s_date, s_role, s_hours = s_data
+                st.write(f"📅 **Data:** {s_date}")
+                st.write(f"⏰ **Godziny:** {s_hours}")
+                st.write(f"🎭 **Stanowisko:** {s_role}")
+                
+                # Szukamy dostępnych
+                d_obj = datetime.strptime(s_date, "%Y-%m-%d").date()
+                candidates = get_candidates_for_shift(d_obj, s_role, s_hours)
+                
+                if candidates:
+                    st.success(f"Znaleziono {len(candidates)} dostępnych osób.")
+                    # Sortujemy alfabetycznie dla porządku
+                    candidates.sort()
+                    selected_emp = st.selectbox("Wybierz pracownika:", candidates)
+                    
+                    if st.button("Zapisz pracownika"):
+                        conn = get_db_connection()
+                        conn.execute("UPDATE shifts SET employee_name=? WHERE id=?", (selected_emp, shift_id))
+                        conn.commit()
+                        conn.close()
+                        st.session_state.needs_rerun = True # Flaga do odświeżenia
+                        st.rerun()
+                else:
+                    st.warning("⚠️ Brak pracowników spełniających kryteria (Dyspozycje + 11h).")
+                    all_emps_force = [r[0] for r in get_db_connection().execute("SELECT name FROM employees").fetchall()]
+                    force_emp = st.selectbox("Wymuś przypisanie (wszyscy):", ["Wybierz..."] + all_emps_force)
+                    if force_emp != "Wybierz..." and st.button("Wymuś zapis"):
+                        conn = get_db_connection()
+                        conn.execute("UPDATE shifts SET employee_name=? WHERE id=?", (force_emp, shift_id))
+                        conn.commit()
+                        conn.close()
+                        st.session_state.needs_rerun = True
+                        st.rerun()
+
+        # Sprawdzenie czy kliknięto w link (parametr URL)
+        if "edit_id" in st.query_params:
+            s_id = st.query_params["edit_id"]
+            # Czyścimy URL żeby okno nie wyskakiwało po odświeżeniu
+            st.query_params.clear() 
+            edit_shift_dialog(s_id)
+
+        # --- GŁÓWNY WIDOK GRAFIKU ---
         st.title("📋 Grafik")
         tab_g, tab_s = st.tabs(["Grafik", "📊 Statystyki"])
         d_start = st.session_state.active_week_start
@@ -775,7 +874,7 @@ elif st.session_state.user_role == "manager":
                 st.rerun()
 
             if not df_view.empty:
-                # POPRAWKA: Wcięcie (indentation) oraz powrót do st.markdown dla stylów CSS
+                # Render HTML z linkami
                 st.markdown(render_html_schedule(df_view, d_start), unsafe_allow_html=True)
                 
                 c1, c2 = st.columns(2)
@@ -784,24 +883,7 @@ elif st.session_state.user_role == "manager":
                     st.download_button("Pobierz", pdf, "grafik.pdf", "application/pdf")
                 
                 st.write("---")
-                st.subheader("🛠️ Szybka Korekta")
-                opts = df_view.apply(lambda x: f"{x['id']}: {x['date']} | {x['role']} | {x['employee_name']}", axis=1).tolist()
-                
-                c1, c2 = st.columns([3, 1])
-                if opts:
-                    sel = c1.selectbox("Wybierz zmianę:", opts)
-                    conn = get_db_connection()
-                    emps = [r[0] for r in conn.execute("SELECT name FROM employees").fetchall()]
-                    conn.close()
-                    new_p = c2.selectbox("Nowa osoba:", ["WAKAT"] + emps)
-                    
-                    if st.button("Zapisz zmianę"):
-                        sid = sel.split(":")[0]
-                        conn = get_db_connection()
-                        conn.execute("UPDATE shifts SET employee_name=? WHERE id=?", (new_p, sid))
-                        conn.commit()
-                        conn.close()
-                        st.rerun()
+                st.info("💡 Kliknij w czerwone pole 'WAKAT', aby szybko przypisać osobę.")
 
         with tab_s:
             if not df_view.empty:
