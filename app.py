@@ -10,7 +10,7 @@ import os
 # --- KONFIGURACJA ---
 st.set_page_config(page_title="ETHER | SYNC MASTER", layout="wide")
 DATA_FOLDER = "ether_data"
-HOURLY_RATE = 30.50  # stawka do wyliczeń w kartach czasu
+HOURLY_RATE = 30.50
 
 # --- STYLE CSS ---
 st.markdown("""
@@ -847,3 +847,4 @@ elif st.session_state.user_role == "manager":
                     summary = week_logs.groupby("Pracownik")['Godziny'].sum().reset_index()
                     summary['Szacunkowo [PLN]'] = summary['Godziny'] * HOURLY_RATE
                     st.dataframe(summary, use_container_width=True)
+
