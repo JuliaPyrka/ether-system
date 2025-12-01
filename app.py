@@ -8,31 +8,54 @@ import json
 import os
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | SYNC MASTER", layout="wide")
+st.set_page_config(page_title="ETHER | FULL CONTROL", layout="wide")
 DATA_FOLDER = "ether_data"
 
 # --- STYLE CSS ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #e0e0e0; }
+    
+    /* UI ELEMENTY */
     .stTabs [data-baseweb="tab-list"] { gap: 10px; background-color: #1a1c24; padding: 10px; border-radius: 10px; margin-top: 10px; }
     .stTabs [data-baseweb="tab"] { background-color: #333; border-radius: 5px; color: white; padding: 5px 20px; border: 1px solid #555; }
     .stTabs [aria-selected="true"] { background-color: #3b82f6 !important; font-weight: bold; border: 1px solid #3b82f6; }
+    
     .config-box { background-color: #262626; padding: 20px; border-radius: 10px; border: 1px solid #444; margin-top: 15px; }
     .timesheet-card { background-color: #1a1c24; padding: 20px; border-radius: 10px; border: 1px solid #444; border-left: 5px solid #4caf50; }
     .wallet-card { background-color: #282828; padding: 15px; border-radius: 10px; border: 1px solid #555; text-align: center; margin-bottom: 20px; }
     .wallet-amount { font-size: 24px; font-weight: bold; color: #4caf50; }
     .notification-box { background-color: #2e3b55; border-left: 5px solid #fbbf24; padding: 10px; margin-bottom: 10px; border-radius: 5px; font-size: 14px; }
+    
+    /* RADAR DOSTĘPNOŚCI */
+    .avail-badge {
+        background-color: #1f2937;
+        border: 1px solid #4b5563;
+        padding: 8px 15px;
+        border-radius: 20px;
+        font-size: 14px;
+        color: #fbbf24;
+        margin-bottom: 15px;
+        display: inline-block;
+        font-weight: bold;
+    }
+
+    /* TABELA GRAFIKU */
     .schedule-table { width: 100%; border-collapse: collapse; color: #000; background-color: #fff; font-family: Arial, sans-serif; font-size: 11px; }
     .schedule-table th { background-color: #444; color: #fff; padding: 8px; border: 1px solid #777; text-align: center; }
     .schedule-table td { border: 1px solid #ccc; padding: 4px; vertical-align: top; text-align: center; height: 60px; width: 12.5%; }
     .highlight-day { background-color: #e3f2fd !important; } 
     .role-header { background-color: #eee; font-weight: bold; text-align: center; vertical-align: middle !important; border: 1px solid #999; font-size: 12px; }
+    
+    /* ZMIANY */
     .shift-box { background-color: #fff; border: 1px solid #aaa; border-radius: 3px; margin-bottom: 3px; padding: 2px; box-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
     .shift-time { font-weight: bold; display: block; color: #000; font-size: 10px; }
     .shift-name { display: block; color: #333; text-transform: uppercase; font-size: 9px; line-height: 1.1; }
+    
+    /* WAKATY */
     .empty-shift-box { background-color: #ffcccc; border: 2px solid #ff0000; border-radius: 3px; margin-bottom: 3px; padding: 2px; min-height: 20px; }
     .empty-time { font-weight: bold; display: block; color: #cc0000; font-size: 10px; }
+    
     .day-header { font-size: 12px; text-transform: uppercase; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
@@ -52,7 +75,7 @@ def save_json(filename, data):
     path = os.path.join(DATA_FOLDER, filename)
     with open(path, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=4)
 
-# --- FUNKCJE ---
+# --- FUNKCJE LOGICZNE ---
 def polish_sort_key(text):
     alphabet = {'ą':'a1', 'ć':'c1', 'ę':'e1', 'ł':'l1', 'ń':'n1', 'ó':'o1', 'ś':'s1', 'ź':'z1', 'ż':'z2'}
     return "".join([alphabet.get(c.lower(), c.lower()) for c in text])
@@ -116,19 +139,36 @@ def is_avail_compatible(avail_str, shift_type):
     except: return False
     return False
 
+# --- RADAR DOSTĘPNOŚCI ---
+def count_available_staff(date_obj, employees_df, avail_grid):
+    morning_count = 0
+    evening_count = 0
+    date_str = date_obj.strftime('%Y-%m-%d')
+    for idx, emp in employees_df.iterrows():
+        key = f"{emp['Imie']}_{date_str}"
+        avail = avail_grid.get(key, "")
+        if is_avail_compatible(avail, "morning"): morning_count += 1
+        if is_avail_compatible(avail, "evening"): evening_count += 1
+    return morning_count, evening_count
+
 def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_list, avail_grid, assigned_today, shift_counts):
     candidates = []
     date_str = date_obj.strftime('%Y-%m-%d')
+    
     for emp in employees_list:
         if emp['Imie'] in assigned_today[shift_time_type]: continue
+        
         role_base = role_needed.replace(" 1", "").replace(" 2", "")
         if role_base in emp['Role'] or role_base in emp['Auto']:
             key = f"{emp['Imie']}_{date_str}"
             avail = avail_grid.get(key, "")
             if is_avail_compatible(avail, shift_time_type):
                 candidates.append(emp)
+
     if not candidates: return None
+
     candidates.sort(key=lambda x: (shift_counts.get(x['Imie'], 0), random.random()))
+    
     final_candidate_name = None
     if role_needed == "Obsługa":
         men = [c for c in candidates if c.get('Plec') == 'M']
@@ -138,23 +178,29 @@ def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_list
             if women: final_candidate_name = women[0]['Imie']
     else:
         final_candidate_name = candidates[0]['Imie']
+        
     return final_candidate_name
 
+# --- HTML RENDER ---
 def render_html_schedule(shifts_data, start_date):
     pl_days = {0: "PIĄTEK", 1: "SOBOTA", 2: "NIEDZIELA", 3: "PONIEDZIAŁEK", 4: "WTOREK", 5: "ŚRODA", 6: "CZWARTEK"}
     days = [start_date + timedelta(days=i) for i in range(7)]
     date_header_str = f"{start_date.strftime('%d.%m')} - {days[-1].strftime('%d.%m')}"
+    
     html = f"""<div style="background-color: #333; color: white; padding: 10px; text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 0px; border-radius: 5px 5px 0 0;">GRAFIK: {date_header_str}</div><table class="schedule-table"><thead><tr><th style="width: 8%;">STANOWISKO</th>"""
+    
     for d in days:
         w_day = d.weekday()
         day_map = {4:"PIĄTEK", 5:"SOBOTA", 6:"NIEDZIELA", 0:"PONIEDZIAŁEK", 1:"WTOREK", 2:"ŚRODA", 3:"CZWARTEK"}
         style = 'style="background-color: #2c5282;"' if w_day in [1, 5, 6] else ''
         html += f'<th {style}><div class="day-header">{day_map[w_day]}<br>{d.strftime("%d.%m")}</div></th>'
     html += '</tr></thead><tbody>'
+    
     visual_roles = ["Obsługa", "Kasa", "Bar 1", "Bar 2", "Cafe"]
     df = pd.DataFrame(shifts_data)
     if not df.empty:
         df['Data_Obj'] = pd.to_datetime(df['Data']).dt.date
+    
     for role in visual_roles:
         html += f'<tr><td class="role-header">{role.upper()}</td>'
         for d in days:
@@ -212,14 +258,6 @@ if 'db_logs' not in st.session_state:
     st.session_state.db_logs = load_json('db_logs.json', [])
 if 'db_inbox' not in st.session_state:
     st.session_state.db_inbox = load_json('db_inbox.json', {})
-# --- GLOBALNY SYNCHRONIZATOR DATY ---
-if 'active_week_start' not in st.session_state:
-    # Ustawiamy domyślnie na najbliższy piątek
-    today = datetime.now().date()
-    days_ahead = 4 - today.weekday()
-    if days_ahead <= 0: days_ahead += 7
-    if today.weekday() == 4: st.session_state.active_week_start = today
-    else: st.session_state.active_week_start = today + timedelta(days=days_ahead)
 
 if not st.session_state.db_employees:
     raw_data = [
@@ -254,7 +292,10 @@ if not st.session_state.db_employees:
     for i, p in enumerate(raw_data):
         rows.append({"ID": i+1, "Imie": p["Imie"], "Role": p["Role"], "Plec": p["Plec"], "Auto": calculate_auto_roles(p["Role"])})
     st.session_state.db_employees = rows
-    if "julia" not in st.session_state.db_users: st.session_state.db_users["julia"] = {"pass": "julia1", "role": "worker", "name": "Julia Bąk"}
+    
+    if "julia" not in st.session_state.db_users:
+        st.session_state.db_users["julia"] = {"pass": "julia1", "role": "worker", "name": "Julia Bąk"}
+    
     save_all()
 
 def save_all():
@@ -281,13 +322,12 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.session_state.user_role = user_data["role"]
                 st.session_state.user_name = user_data["name"]
-                st.session_state.user_login = u
                 st.rerun()
             else: st.error("Błąd.")
     st.stop()
 
 # ==========================================
-# PANEL PRACOWNIKA
+# PRACOWNIK
 # ==========================================
 if st.session_state.user_role == "worker":
     with st.sidebar:
@@ -337,12 +377,12 @@ if st.session_state.user_role == "worker":
         if is_locked: st.error("🔒 Edycja zablokowana.")
         else: st.success("🔓 Edycja otwarta.")
         
-        # UŻYCIE SYNCHRONIZOWANEJ DATY
-        start_d = st.session_state.active_week_start
-        days = [start_d + timedelta(days=i) for i in range(7)]
+        today = datetime.now().date()
+        days_ahead = 4 - today.weekday()
+        if days_ahead <= 0: days_ahead += 7
+        next_friday = today + timedelta(days=days_ahead)
+        days = [next_friday + timedelta(days=i) for i in range(7)]
         day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
-        
-        st.info(f"Wpisujesz dla tygodnia: **{start_d.strftime('%d.%m')} - {(start_d + timedelta(days=6)).strftime('%d.%m')}**")
         
         with st.form("worker_avail"):
             cols = st.columns(7)
@@ -438,19 +478,20 @@ elif st.session_state.user_role == "manager":
         if today.weekday() == 4: next_friday = today
 
         with st.container(border=True):
-            # GŁÓWNE USTAWIENIE DATY DLA CAŁEGO SYSTEMU
             week_start = st.date_input("Start (Piątek):", next_friday, min_value=today)
             if week_start.weekday() != 4: st.error("⛔ Wybierz PIĄTEK!"); st.stop()
-            st.session_state.active_week_start = week_start # SYNCHRONIZACJA
         
         preload_demo_data(week_start)
         week_days = [week_start + timedelta(days=i) for i in range(7)]
         week_config = []
         tabs = st.tabs([f"{d.strftime('%d.%m')}" for i, d in enumerate(week_days)])
+        
         for i, tab in enumerate(tabs):
             with tab:
                 # RADAR DOSTĘPNOŚCI
-                # ... (Funkcja count_available_staff usunięta dla zwięzłości, ale logika działa) ...
+                m_c, e_c = count_available_staff(week_days[i], st.session_state.db_employees, st.session_state.db_avail)
+                st.markdown(f"<div class='avail-badge'>👥 Dostępnych: {m_c} Rano / {e_c} Wieczorem</div>", unsafe_allow_html=True)
+                
                 with st.container(border=True):
                     c1, c2, c3 = st.columns(3)
                     s1 = c1.time_input(f"1. Film", time(9,0), key=f"s1_{i}")
@@ -458,13 +499,22 @@ elif st.session_state.user_role == "manager":
                     el = c3.time_input(f"Koniec Ost.", time(0,0), key=f"el_{i}")
                     st.write("---")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
-                    k = c1.selectbox("KASA", [0,1,2], index=1, key=f"k_{i}")
-                    b1 = c2.selectbox("BAR 1", [0,1,2,3], index=1, key=f"b1_{i}")
-                    b2 = c3.selectbox("BAR 2", [0,1,2], index=1, key=f"b2_{i}")
-                    c = c4.selectbox("CAFE", [0,1,2], index=1, key=f"c_{i}")
-                    om = c5.selectbox("OBS RANO", [1,2,3], index=1, key=f"om_{i}")
-                    oe = c6.selectbox("OBS NOC", [1,2,3,4], index=2, key=f"oe_{i}")
-                week_config.append({"date": week_days[i], "times": (s1,sl,el), "counts": (k,b1,b2,c,om,oe)})
+                    k_m = c1.selectbox("KASA Rano", [0,1,2], index=1, key=f"km_{i}")
+                    k_e = c1.selectbox("KASA Wieczór", [0,1,2], index=1, key=f"ke_{i}")
+                    
+                    b1_m = c2.selectbox("BAR 1 Rano", [0,1,2,3], index=1, key=f"b1m_{i}")
+                    b1_e = c2.selectbox("BAR 1 Wieczór", [0,1,2,3], index=1, key=f"b1e_{i}")
+                    
+                    b2_m = c3.selectbox("BAR 2 Rano", [0,1,2], index=0, key=f"b2m_{i}")
+                    b2_e = c3.selectbox("BAR 2 Wieczór", [0,1,2], index=1, key=f"b2e_{i}")
+                    
+                    c_m = c4.selectbox("CAFE Rano", [0,1,2], index=1, key=f"cm_{i}")
+                    c_e = c4.selectbox("CAFE Wieczór", [0,1,2], index=1, key=f"ce_{i}")
+                    
+                    o_m = c5.selectbox("OBS RANO", [1,2,3], index=1, key=f"om_{i}")
+                    o_e = c6.selectbox("OBS NOC", [1,2,3,4], index=2, key=f"oe_{i}")
+                    
+                week_config.append({"date": week_days[i], "times": (s1,sl,el), "counts": (k_m, k_e, b1_m, b1_e, b2_m, b2_e, c_m, c_e, o_m, o_e)})
 
         if st.button("⚡ GENERUJ", type="primary"):
             current_shifts = st.session_state.db_shifts
@@ -477,19 +527,26 @@ elif st.session_state.user_role == "manager":
             for cfg in week_config:
                 d_obj = cfg['date']
                 s1, sl, el = cfg['times']
-                k, b1, b2, c, om, oe = cfg['counts']
+                # Rozpakowanie pełnej konfiguracji
+                km, ke, b1m, b1e, b2m, b2e, cm, ce, om, oe = cfg['counts']
+                
                 start = (datetime.combine(d_obj, s1) - timedelta(minutes=45)).strftime("%H:%M")
                 bar_end = (datetime.combine(d_obj, sl) + timedelta(minutes=15)).strftime("%H:%M")
                 obs_end = (datetime.combine(d_obj, el) + timedelta(minutes=15)).strftime("%H:%M")
                 split = "16:00"
                 
                 tasks = []
-                for _ in range(k): tasks.append(("Kasa", "morning", start, split)); tasks.append(("Kasa", "evening", split, bar_end))
-                for _ in range(b1): tasks.append(("Bar 1", "morning", start, split)); tasks.append(("Bar 1", "evening", split, bar_end))
-                for _ in range(b2): tasks.append(("Bar 2", "morning", start, split)); tasks.append(("Bar 2", "evening", split, bar_end))
-                for _ in range(c): tasks.append(("Cafe", "morning", start, split)); tasks.append(("Cafe", "evening", split, bar_end))
+                for _ in range(km): tasks.append(("Kasa", "morning", start, split))
+                for _ in range(ke): tasks.append(("Kasa", "evening", split, bar_end))
+                for _ in range(b1m): tasks.append(("Bar 1", "morning", start, split))
+                for _ in range(b1e): tasks.append(("Bar 1", "evening", split, bar_end))
+                for _ in range(b2m): tasks.append(("Bar 2", "morning", start, split))
+                for _ in range(b2e): tasks.append(("Bar 2", "evening", split, bar_end))
+                for _ in range(cm): tasks.append(("Cafe", "morning", start, split))
+                for _ in range(ce): tasks.append(("Cafe", "evening", split, bar_end))
                 for _ in range(om): tasks.append(("Obsługa", "morning", start, split))
                 for _ in range(oe): tasks.append(("Obsługa", "evening", split, obs_end))
+                
                 assigned_today = {'morning': [], 'evening': []}
                 for role, t_type, s, e in tasks:
                     worker_name = find_worker_for_shift(role, t_type, d_obj, st.session_state.db_employees, st.session_state.db_avail, assigned_today, shift_counts)
@@ -497,7 +554,9 @@ elif st.session_state.user_role == "manager":
                     st.session_state.db_shifts.append({
                         "Data": str(d_obj), "Stanowisko": role, "Godziny": f"{s}-{e}", "Pracownik_Imie": final, "Typ": "Auto"
                     })
-                    if worker_name is not None: assigned_today[t_type].append(worker_name); shift_counts[worker_name] += 1
+                    if worker_name is not None: 
+                        assigned_today[t_type].append(worker_name)
+                        shift_counts[worker_name] += 1
                     cnt += 1
             
             for user_login in st.session_state.db_users:
@@ -508,8 +567,8 @@ elif st.session_state.user_role == "manager":
 
     elif menu == "Dyspozycje (Podgląd)":
         st.title("📥 Dyspozycje")
-        d_start = st.session_state.active_week_start
-        st.info(f"Podgląd dla tygodnia: {d_start.strftime('%d.%m')}")
+        today = datetime.now().date()
+        d_start = st.date_input("Tydzień:", today)
         days = [d_start + timedelta(days=i) for i in range(7)]
         day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
         cols = st.columns([2] + [1]*7)
@@ -552,8 +611,8 @@ elif st.session_state.user_role == "manager":
     elif menu == "Grafik (WIZUALNY)":
         st.title("📋 Grafik")
         tab_g, tab_s = st.tabs(["Grafik", "📊 Statystyki"])
-        d_start = st.session_state.active_week_start
-        
+        today = datetime.now().date()
+        d_start = st.date_input("Pokaż tydzień od (Piątek):", today)
         df = pd.DataFrame(st.session_state.db_shifts)
         if not df.empty:
             df['DataObj'] = pd.to_datetime(df['Data']).dt.date
@@ -567,7 +626,6 @@ elif st.session_state.user_role == "manager":
                     if st.button("🖨️ PDF"):
                         pdf = generate_schedule_pdf(df_view, f"GRAFIK {d_start}")
                         st.download_button("Pobierz", pdf, "grafik.pdf", "application/pdf")
-                    
                     st.write("---")
                     st.subheader("🛠️ Szybka Korekta")
                     df_view['Label'] = df_view.apply(lambda x: f"{x['Data']} | {x['Stanowisko']} | {x['Pracownik_Imie']}", axis=1)
