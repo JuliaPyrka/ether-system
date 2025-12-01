@@ -8,7 +8,7 @@ import json
 import os
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | PATCHED", layout="wide")
+st.set_page_config(page_title="ETHER | FULL INTEGRITY", layout="wide")
 DATA_FOLDER = "ether_data"
 
 # --- STYLE CSS ---
@@ -101,9 +101,7 @@ def send_notification(to_user_login, message):
     st.session_state.db_inbox[to_user_login].insert(0, f"[{timestamp}] {message}")
     save_json('db_inbox.json', st.session_state.db_inbox)
 
-# --- BRAKUJĄCA FUNKCJA (NAPRAWA BŁĘDU) ---
 def preload_demo_data(start_date):
-    # Tylko jeśli baza dyspozycji jest pusta, żeby nie nadpisywać
     if not st.session_state.db_avail:
         demo_avail = {
             "Julia Bąk": ["16-1", "-", "8-1", "-", "16-1", "-", "16-1"], 
@@ -238,12 +236,34 @@ if 'db_logs' not in st.session_state:
 if 'db_inbox' not in st.session_state:
     st.session_state.db_inbox = load_json('db_inbox.json', {})
 
-# Demo dane
+# DEMO DATA (TYLKO GDY PUSTE)
 if not st.session_state.db_employees:
     raw_data = [
         {"Imie": "Julia Bąk", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"], "Plec": "K"},
         {"Imie": "Kacper Borzechowski", "Role": ["Bar", "Obsługa", "Plakaty (Techniczne)"], "Plec": "M"},
-        # ... reszta dla przykładu ...
+        {"Imie": "Wiktor Buc", "Role": ["Obsługa"], "Plec": "M"},
+        {"Imie": "Anna Dubińska", "Role": ["Bar", "Obsługa"], "Plec": "K"},
+        {"Imie": "Julia Fidor", "Role": ["Bar", "Obsługa"], "Plec": "K"},
+        {"Imie": "Julia Głowacka", "Role": ["Cafe", "Bar", "Obsługa"], "Plec": "K"},
+        {"Imie": "Martyna Grela", "Role": ["Bar", "Obsługa"], "Plec": "K"},
+        {"Imie": "Weronika Jabłońska", "Role": ["Bar", "Obsługa"], "Plec": "K"},
+        {"Imie": "Jarosław Kaca", "Role": ["Bar", "Obsługa"], "Plec": "M"},
+        {"Imie": "Michał Kowalczyk", "Role": ["Obsługa"], "Plec": "M"},
+        {"Imie": "Dominik Mleczkowski", "Role": ["Cafe", "Bar", "Obsługa"], "Plec": "M"},
+        {"Imie": "Aleksandra Pacek", "Role": ["Cafe", "Bar", "Obsługa"], "Plec": "K"},
+        {"Imie": "Paweł Pod", "Role": ["Obsługa"], "Plec": "M"},
+        {"Imie": "Aleksander Prus", "Role": ["Obsługa"], "Plec": "M"},
+        {"Imie": "Julia Pyrka", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"], "Plec": "K"},
+        {"Imie": "Wiktoria Siara", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"], "Plec": "K"},
+        {"Imie": "Damian Siwak", "Role": ["Obsługa"], "Plec": "M"},
+        {"Imie": "Katarzyna Stanisławska", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"], "Plec": "K"},
+        {"Imie": "Patryk Szczodry", "Role": ["Obsługa"], "Plec": "M"},
+        {"Imie": "Anna Szymańska", "Role": ["Bar", "Obsługa"], "Plec": "K"},
+        {"Imie": "Hubert War", "Role": ["Bar", "Obsługa", "Plakaty (Techniczne)"], "Plec": "M"},
+        {"Imie": "Marysia Wojtysiak", "Role": ["Cafe", "Bar", "Obsługa"], "Plec": "K"},
+        {"Imie": "Michał Wojtysiak", "Role": ["Obsługa"], "Plec": "M"},
+        {"Imie": "Weronika Ziętkowska", "Role": ["Cafe", "Bar", "Obsługa"], "Plec": "K"},
+        {"Imie": "Magda Żurowska", "Role": ["Bar", "Obsługa"], "Plec": "K"}
     ]
     raw_data.sort(key=lambda x: polish_sort_key(x['Imie'].split()[-1]))
     rows = []
@@ -253,6 +273,7 @@ if not st.session_state.db_employees:
     
     if "julia" not in st.session_state.db_users:
         st.session_state.db_users["julia"] = {"pass": "julia1", "role": "worker", "name": "Julia Bąk"}
+        st.session_state.db_users["kacper"] = {"pass": "kacper1", "role": "worker", "name": "Kacper Borzechowski"}
     
     save_all()
 
@@ -298,7 +319,7 @@ if st.session_state.user_role == "worker":
 
     my_msgs = st.session_state.db_inbox.get(st.session_state.user_login, [])
     if my_msgs:
-        with st.expander(f"🔔 Powiadomienia ({len(my_msgs)})", expanded=True):
+        with st.expander(f"🔔 Masz powiadomienia ({len(my_msgs)})", expanded=True):
             for m in my_msgs: st.markdown(f"<div class='notification-box'>{m}</div>", unsafe_allow_html=True)
             if st.button("Wyczyść"): 
                 st.session_state.db_inbox[st.session_state.user_login] = []
@@ -354,6 +375,21 @@ if st.session_state.user_role == "worker":
             if st.form_submit_button("Zapisz", disabled=is_locked):
                 save_all()
                 st.toast("Zapisano!", icon="✅")
+        
+        st.write("---")
+        st.subheader("👀 Podgląd Zespołu")
+        with st.expander("Kto kiedy może?"):
+            avail_data = []
+            for emp in st.session_state.db_employees:
+                row = {"Pracownik": emp['Imie']}
+                has_val = False
+                for d in days:
+                    k = f"{emp['Imie']}_{d.strftime('%Y-%m-%d')}"
+                    v = st.session_state.db_avail.get(k, "")
+                    if v: has_val = True
+                    row[d.strftime('%a')] = v
+                if has_val: avail_data.append(row)
+            if avail_data: st.dataframe(pd.DataFrame(avail_data))
 
     elif menu == "⏱️ Karta Czasu":
         st.title("Ewidencja")
@@ -365,10 +401,10 @@ if st.session_state.user_role == "worker":
         if my_shifts.empty:
             st.warning("Brak zmian w grafiku.")
         else:
-            shift_options = my_shifts.apply(lambda x: f"{x['Data']} | {x['Stanowisko']} ({x['Godziny']})", axis=1).tolist()
+            opts = my_shifts.apply(lambda x: f"{x['Data']} | {x['Stanowisko']} ({x['Godziny']})", axis=1).tolist()
             with st.container():
                 st.markdown("<div class='timesheet-card'>", unsafe_allow_html=True)
-                sel = st.selectbox("Wybierz zmianę:", shift_options)
+                sel = st.selectbox("Wybierz zmianę:", opts)
                 def_s, def_e = time(16,0), time(0,0)
                 try:
                     hp = sel.split("(")[1].replace(")", "")
@@ -399,7 +435,9 @@ if st.session_state.user_role == "worker":
             if not df_logs.empty:
                 my_logs_view = df_logs[df_logs['Pracownik'] == st.session_state.user_name]
                 if not my_logs_view.empty:
-                    st.metric("Suma Godzin", f"{my_logs_view['Godziny'].sum():.2f} h")
+                    rate = 30.50
+                    total = my_logs_view['Godziny'].sum()
+                    st.markdown(f"<div class='wallet-card'><div>Szacunkowy zarobek:</div><div class='wallet-amount'>{total * rate:.2f} PLN</div></div>", unsafe_allow_html=True)
                     st.dataframe(my_logs_view, use_container_width=True)
 
 # ==========================================
@@ -407,7 +445,7 @@ if st.session_state.user_role == "worker":
 # ==========================================
 elif st.session_state.user_role == "manager":
     with st.sidebar:
-        st.title("🔧 KIEROWNIK")
+        st.title("🔧 PANEL KIEROWNIKA")
         menu = st.radio("Nawigacja:", ["Auto-Planer (LOGISTIC)", "Dyspozycje (Podgląd)", "Kadry (Edycja)", "Grafik (WIZUALNY)"])
         if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
 
@@ -418,7 +456,6 @@ elif st.session_state.user_role == "manager":
         if days_ahead <= 0: days_ahead += 7
         next_friday = today + timedelta(days=days_ahead)
         if today.weekday() == 4: next_friday = today
-
         with st.container(border=True):
             week_start = st.date_input("Start (Piątek):", next_friday, min_value=today)
             if week_start.weekday() != 4: st.error("⛔ Wybierz PIĄTEK!"); st.stop()
@@ -427,7 +464,6 @@ elif st.session_state.user_role == "manager":
         week_days = [week_start + timedelta(days=i) for i in range(7)]
         week_config = []
         tabs = st.tabs([f"{d.strftime('%d.%m')}" for i, d in enumerate(week_days)])
-        
         for i, tab in enumerate(tabs):
             with tab:
                 with st.container(border=True):
@@ -470,7 +506,7 @@ elif st.session_state.user_role == "manager":
                 for _ in range(om): tasks.append(("Obsługa", "morning", start, split))
                 for _ in range(oe): tasks.append(("Obsługa", "evening", split, obs_end))
                 
-                assigned = {'morning': [], 'evening': [], 'all_day': []}
+                assigned = {'morning': [], 'evening': []}
                 for role, t_type, s, e in tasks:
                     worker = find_worker_for_shift(role, t_type, d_obj, st.session_state.db_employees, st.session_state.db_avail, assigned, shift_counts)
                     final = worker if worker else "WAKAT"
@@ -479,8 +515,9 @@ elif st.session_state.user_role == "manager":
                     })
                     if worker:
                         assigned[t_type].append(worker)
-                        assigned['all_day'].append(worker)
-                        shift_counts[worker] += 1
+                        # Bonus za weekend i dyspozycyjność
+                        points = 2 if d_obj.weekday() >= 4 else 1
+                        shift_counts[worker] += points
                     cnt += 1
             
             for user_login in st.session_state.db_users:
@@ -509,31 +546,61 @@ elif st.session_state.user_role == "manager":
 
     elif menu == "Kadry (Edycja)":
         st.title("📇 Kadry i Konta")
-        with st.expander("➕ Dodaj Pracownika i Konto"):
-            with st.form("add_user"):
-                u_name = st.text_input("Imię i Nazwisko")
-                u_login = st.text_input("Login")
-                u_pass = st.text_input("Hasło")
-                u_roles = st.multiselect("Role", ["Obsługa", "Bar", "Kasa", "Cafe"])
-                u_plec = st.selectbox("Płeć", ["K", "M"])
-                if st.form_submit_button("Utwórz"):
-                    st.session_state.db_users[u_login] = {"pass": u_pass, "role": "worker", "name": u_name}
-                    auto = calculate_auto_roles(u_roles)
-                    st.session_state.db_employees.append({
-                        "ID": len(st.session_state.db_employees)+1, "Imie": u_name, "Role": u_roles, "Plec": u_plec, "Auto": auto
-                    })
-                    save_all()
-                    st.success("Konto utworzone!")
-                    st.rerun()
-        st.write("---")
-        users_data = []
-        for login, data in st.session_state.db_users.items():
-            users_data.append({"Login": login, "Imię": data["name"], "Rola": data["role"]})
-        st.dataframe(pd.DataFrame(users_data))
+        
+        # --- PRZYWRÓCONA SEKCJA EDYCJI ---
+        c_edit, c_table = st.columns([1, 2])
+        
+        with c_edit:
+            st.subheader("Edytor")
+            emp_names = [e['Imie'] for e in st.session_state.db_employees]
+            selected = st.selectbox("Wybierz osobę:", ["-- NOWY --"] + emp_names)
+            
+            with st.form("edit_hr"):
+                if selected == "-- NOWY --":
+                    f_name = st.text_input("Imię i Nazwisko")
+                    f_login = st.text_input("Login (opcjonalnie)")
+                    f_pass = st.text_input("Hasło (opcjonalnie)")
+                    f_role = st.multiselect("Role", ["Obsługa", "Bar", "Kasa", "Cafe"])
+                    f_plec = st.selectbox("Płeć", ["K", "M"])
+                    if st.form_submit_button("Utwórz"):
+                        auto = calculate_auto_roles(f_role)
+                        st.session_state.db_employees.append({
+                            "ID": len(st.session_state.db_employees)+1, "Imie": f_name, 
+                            "Role": f_role, "Plec": f_plec, "Auto": auto
+                        })
+                        if f_login and f_pass:
+                            st.session_state.db_users[f_login] = {"pass": f_pass, "role": "worker", "name": f_name}
+                        save_all()
+                        st.rerun()
+                else:
+                    # Znajdź index
+                    idx = next(i for i, e in enumerate(st.session_state.db_employees) if e['Imie'] == selected)
+                    curr = st.session_state.db_employees[idx]
+                    
+                    f_name = st.text_input("Imię", value=curr['Imie'])
+                    f_role = st.multiselect("Role", ["Obsługa", "Bar", "Kasa", "Cafe"], default=curr['Role'])
+                    f_plec = st.selectbox("Płeć", ["K", "M"], index=0 if curr['Plec']=="K" else 1)
+                    
+                    c_save, c_del = st.columns(2)
+                    if c_save.form_submit_button("Zapisz"):
+                        st.session_state.db_employees[idx]['Imie'] = f_name
+                        st.session_state.db_employees[idx]['Role'] = f_role
+                        st.session_state.db_employees[idx]['Plec'] = f_plec
+                        save_all()
+                        st.rerun()
+                    
+                    if c_del.form_submit_button("Usuń"):
+                        del st.session_state.db_employees[idx]
+                        save_all()
+                        st.rerun()
+
+        with c_table:
+            df = pd.DataFrame(st.session_state.db_employees)
+            if not df.empty: st.dataframe(df[["Imie", "Role", "Plec"]], use_container_width=True, height=600)
 
     elif menu == "Grafik (WIZUALNY)":
         st.title("📋 Grafik")
-        tab_g, tab_s = st.tabs(["Grafik", "📊 Statystyki Sprawiedliwości"])
+        tab_g, tab_s = st.tabs(["Widok", "Statystyki"])
         today = datetime.now().date()
         d_start = st.date_input("Pokaż tydzień od (Piątek):", today)
         
@@ -543,6 +610,7 @@ elif st.session_state.user_role == "manager":
             d_end = d_start + timedelta(days=6)
             mask = (df['DataObj'] >= d_start) & (df['DataObj'] <= d_end)
             df_view = df.loc[mask]
+            
             if not df_view.empty:
                 with tab_g:
                     st.markdown(render_html_schedule(df_view, d_start), unsafe_allow_html=True)
@@ -550,14 +618,35 @@ elif st.session_state.user_role == "manager":
                     if st.button("🖨️ PDF"):
                         pdf = generate_schedule_pdf(df_view, f"GRAFIK {d_start}")
                         st.download_button("Pobierz", pdf, "grafik.pdf", "application/pdf")
+                    
+                    # SZYBKA KOREKTA
+                    st.write("---")
+                    st.subheader("🛠️ Szybka Korekta")
+                    # Etykiety zmian
+                    df_view['Label'] = df_view.apply(lambda x: f"{x['Data']} | {x['Stanowisko']} | {x['Pracownik_Imie']}", axis=1)
+                    shift_list = df_view['Label'].tolist()
+                    
+                    c1, c2 = st.columns([3,1])
+                    target_shift = c1.selectbox("Zmiana:", shift_list)
+                    new_person = c2.selectbox("Nowa osoba:", ["WAKAT"] + [e['Imie'] for e in st.session_state.db_employees])
+                    
+                    if st.button("Zmień"):
+                        t_date, t_role, t_curr = target_shift.split(" | ")
+                        # Znajdź w bazie i podmień
+                        for s in st.session_state.db_shifts:
+                            if s['Data'] == t_date and s['Stanowisko'] == t_role and s['Pracownik_Imie'] == t_curr:
+                                s['Pracownik_Imie'] = "" if new_person == "WAKAT" else new_person
+                                break
+                        save_all()
+                        st.rerun()
+
                 with tab_s:
-                    st.subheader("Kto ile ma zmian?")
+                    st.subheader("📊 Obciążenie")
                     real = df_view[df_view['Pracownik_Imie'].str.len() > 2]
                     if not real.empty:
                         counts = real['Pracownik_Imie'].value_counts().reset_index()
-                        counts.columns = ["Pracownik", "Liczba"]
+                        counts.columns = ["Pracownik", "Liczba Zmian"]
                         st.bar_chart(counts.set_index("Pracownik"))
                         st.dataframe(counts)
-                    else: st.info("Brak obsadzonych zmian.")
-            else: st.info("Brak zmian w tym okresie.")
-        else: st.info("Baza grafiku jest pusta.")
+            else: st.info("Brak zmian.")
+        else: st.info("Baza pusta.")
