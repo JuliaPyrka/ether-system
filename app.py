@@ -8,7 +8,7 @@ import json
 import os
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | FINAL PRO", layout="wide")
+st.set_page_config(page_title="ETHER | FAIRNESS", layout="wide")
 DATA_FOLDER = "ether_data"
 
 # --- STYLE CSS ---
@@ -82,12 +82,13 @@ def clean_text(text):
     return text.encode('latin-1', 'ignore').decode('latin-1')
 
 def is_availability_locked():
+    """Blokada edycji w Poniedziałek o 23:00"""
     now = datetime.now()
-    # Blokada: Wt(1), Śr(2), Czw(3) LUB Pon(0) po 23:00
-    if now.weekday() in [1, 2, 3]: return True
-    if now.weekday() == 0 and now.hour >= 23: return True
+    if now.weekday() == 0 and now.hour >= 23: return True # Poniedziałek po 23
+    if now.weekday() in [1, 2, 3]: return True # Wt, Śr, Czw
     return False 
 
+# --- PARSER DYSPOZYCJI ---
 def is_avail_compatible(avail_str, shift_type):
     if not avail_str or avail_str == "-" or len(avail_str) < 3: return False
     clean = avail_str.replace(" ", "").split("/")[0]
@@ -107,7 +108,6 @@ def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_list
     date_str = date_obj.strftime('%Y-%m-%d')
     
     for emp in employees_list:
-        # Conflict Guard
         if emp['Imie'] in assigned_today[shift_time_type]: continue
         
         role_base = role_needed.replace(" 1", "").replace(" 2", "")
@@ -133,6 +133,7 @@ def find_worker_for_shift(role_needed, shift_time_type, date_obj, employees_list
 
 # --- HTML RENDER ---
 def render_html_schedule(shifts_data, start_date):
+    pl_days = {0: "PIĄTEK", 1: "SOBOTA", 2: "NIEDZIELA", 3: "PONIEDZIAŁEK", 4: "WTOREK", 5: "ŚRODA", 6: "CZWARTEK"}
     days = [start_date + timedelta(days=i) for i in range(7)]
     date_header_str = f"{start_date.strftime('%d.%m')} - {days[-1].strftime('%d.%m')}"
     
@@ -147,17 +148,18 @@ def render_html_schedule(shifts_data, start_date):
     
     visual_roles = ["Obsługa", "Kasa", "Bar 1", "Bar 2", "Cafe"]
     df = pd.DataFrame(shifts_data)
-    if not df.empty:
-        # Upewniamy się, że data jest typem date, a nie stringiem, do porównań
-        df['Data_Obj'] = pd.to_datetime(df['Data']).dt.date
     
+    # Konwersja daty dla filtrowania
+    if not df.empty:
+        df['Data_Obj'] = pd.to_datetime(df['Data']).dt.date
+
     for role in visual_roles:
         html += f'<tr><td class="role-header">{role.upper()}</td>'
         for d in days:
             w_day = d.weekday()
             td_class = 'class="highlight-day"' if w_day in [1, 5, 6] else ''
-            cell_content = ""
             
+            cell_content = ""
             if not df.empty:
                 current_shifts = df[(df['Data_Obj'] == d) & (df['Stanowisko'].str.contains(role, regex=False))]
                 for _, row in current_shifts.iterrows():
@@ -201,8 +203,7 @@ def generate_schedule_pdf(shifts_data, title):
 if 'db_users' not in st.session_state:
     st.session_state.db_users = load_json('db_users.json', {"admin": {"pass": "admin123", "role": "manager", "name": "Kierownik"}})
 if 'db_employees' not in st.session_state:
-    # Domyślna lista tylko jeśli plik nie istnieje
-    default_employees = [] # Pusta, bo dodasz ręcznie lub przez reset
+    default_employees = []
     st.session_state.db_employees = load_json('db_employees.json', default_employees)
 if 'db_shifts' not in st.session_state:
     st.session_state.db_shifts = load_json('db_shifts.json', [])
@@ -211,7 +212,7 @@ if 'db_avail' not in st.session_state:
 if 'db_logs' not in st.session_state:
     st.session_state.db_logs = load_json('db_logs.json', [])
 
-# Jeśli baza pusta, załaduj demo (tylko raz)
+# Domyślne dane (tylko jeśli plik pusty)
 if not st.session_state.db_employees:
     raw_data = [
         {"Imie": "Julia Bąk", "Role": ["Cafe", "Bar", "Obsługa", "Kasa"], "Plec": "K"},
@@ -240,16 +241,17 @@ if not st.session_state.db_employees:
         {"Imie": "Weronika Ziętkowska", "Role": ["Cafe", "Bar", "Obsługa"], "Plec": "K"},
         {"Imie": "Magda Żurowska", "Role": ["Bar", "Obsługa"], "Plec": "K"}
     ]
-    raw_data.sort(key=lambda x: polish_sort_key(x['Imie'].split()[-1]))
+    raw_data.sort(key=lambda x: x['Imie'].split()[-1])
     rows = []
     for i, p in enumerate(raw_data):
         rows.append({"ID": i+1, "Imie": p["Imie"], "Role": p["Role"], "Plec": p["Plec"], "Auto": calculate_auto_roles(p["Role"])})
     st.session_state.db_employees = rows
-    # Dodajemy też konta użytkowników dla demo
+    
+    # Konta demo
     if "julia" not in st.session_state.db_users:
         st.session_state.db_users["julia"] = {"pass": "julia1", "role": "worker", "name": "Julia Bąk"}
         st.session_state.db_users["kacper"] = {"pass": "kacper1", "role": "worker", "name": "Kacper Borzechowski"}
-    # Zapisz od razu
+    
     save_json('db_employees.json', st.session_state.db_employees)
     save_json('db_users.json', st.session_state.db_users)
 
@@ -260,11 +262,16 @@ def save_all():
     save_json('db_avail.json', st.session_state.db_avail)
     save_json('db_logs.json', st.session_state.db_logs)
 
+def check_login(u, p):
+    users = st.session_state.db_users
+    if u in users and users[u]["pass"] == p:
+        return {"role": users[u]["role"], "name": users[u]["name"]}
+    return None
+
 # ==========================================
 # LOGOWANIE
 # ==========================================
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-
 if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1,1,1])
     with col2:
@@ -272,13 +279,13 @@ if not st.session_state.logged_in:
         u = st.text_input("Login")
         p = st.text_input("Hasło", type="password")
         if st.button("ZALOGUJ"):
-            users = st.session_state.db_users
-            if u in users and users[u]["pass"] == p:
+            user_data = check_login(u, p)
+            if user_data:
                 st.session_state.logged_in = True
-                st.session_state.user_role = users[u]["role"]
-                st.session_state.user_name = users[u]["name"]
+                st.session_state.user_role = user_data["role"]
+                st.session_state.user_name = user_data["name"]
                 st.rerun()
-            else: st.error("Błąd.")
+            else: st.error("Błędne dane.")
     st.stop()
 
 # ==========================================
@@ -335,7 +342,6 @@ if st.session_state.user_role == "worker":
     elif menu == "⏱️ Karta Czasu":
         st.title("Ewidencja")
         
-        # Pobieramy zmiany z bazy
         df_shifts = pd.DataFrame(st.session_state.db_shifts)
         my_shifts = pd.DataFrame()
         if not df_shifts.empty:
@@ -344,7 +350,6 @@ if st.session_state.user_role == "worker":
         if my_shifts.empty:
             st.warning("Brak zmian w grafiku.")
         else:
-            # Opcje do wyboru
             shift_options = my_shifts.apply(lambda x: f"{x['Data']} | {x['Stanowisko']} ({x['Godziny']})", axis=1).tolist()
             
             with st.container():
@@ -398,7 +403,7 @@ elif st.session_state.user_role == "manager":
         menu = st.radio("Nawigacja:", ["Auto-Planer (LOGISTIC)", "Dyspozycje (Podgląd)", "Kadry (Edycja)", "Grafik (WIZUALNY)"])
         if st.button("Wyloguj"): st.session_state.logged_in = False; st.rerun()
 
-    # --- 1. AUTO-PLANER (LOGISTIC) ---
+    # --- 1. AUTO-PLANER ---
     if menu == "Auto-Planer (LOGISTIC)":
         st.title("🚀 Generator Logistyczny")
         
@@ -416,9 +421,10 @@ elif st.session_state.user_role == "manager":
             week_end = week_start + timedelta(days=6)
             st.info(f"📅 Planujesz grafik na okres: **{week_start.strftime('%d.%m')} (Pt) - {week_end.strftime('%d.%m')} (Cz)**")
         
-        # Ładowanie demo dyspozycji dla wybranego tygodnia (jeśli puste)
+        # Ładowanie demo dyspozycji
         days_check = [week_start + timedelta(days=i) for i in range(7)]
-        # Tutaj opcjonalnie można wywołać preload_demo_data(week_start) jeśli baza jest pusta
+        # Jeśli chcesz załadować demo (tylko raz):
+        # preload_demo_data(week_start)
         
         week_days = [week_start + timedelta(days=i) for i in range(7)]
         day_labels = ["PIĄTEK", "SOBOTA", "NIEDZIELA", "PONIEDZIAŁEK", "WTOREK", "ŚRODA", "CZWARTEK"]
@@ -433,9 +439,7 @@ elif st.session_state.user_role == "manager":
                     s1 = c_t1.time_input(f"1. Film", time(9,0), key=f"s1_{i}")
                     sl = c_t2.time_input(f"Start Ost.", time(21,0), key=f"sl_{i}")
                     el = c_t3.time_input(f"Koniec Ost.", time(0,0), key=f"el_{i}")
-                    
                     st.write("---")
-                    st.markdown("##### Obsada w tym dniu:")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
                     k = c1.selectbox("KASA", [0,1,2], index=1, key=f"k_{i}")
                     b1 = c2.selectbox("BAR 1", [0,1,2,3], index=1, key=f"b1_{i}")
@@ -443,58 +447,57 @@ elif st.session_state.user_role == "manager":
                     c = c4.selectbox("CAFE", [0,1,2], index=1, key=f"c_{i}")
                     om = c5.selectbox("OBS RANO", [1,2,3], index=1, key=f"om_{i}")
                     oe = c6.selectbox("OBS NOC", [1,2,3,4], index=2, key=f"oe_{i}")
-                
-                week_config.append({
-                    "date": week_days[i], "times": (s1, sl, el), "counts": (k, b1, b2, c, om, oe)
-                })
+                week_config.append({"date": week_days[i], "times": (s1, sl, el), "counts": (k, b1, b2, c, om, oe)})
 
-        st.write("---")
-        if st.button("⚡ GENERUJ CAŁY TYDZIEŃ", type="primary"):
-            # 1. Czyszczenie starych zmian z tego zakresu
+        if st.button("⚡ GENERUJ", type="primary"):
+            # 1. Wyczyść stare
             current_shifts = st.session_state.db_shifts
-            # Filtrujemy: zostawiamy tylko te spoza zakresu
             start_s = str(week_days[0])
             end_s = str(week_days[-1])
             st.session_state.db_shifts = [s for s in current_shifts if not (start_s <= s['Data'] <= end_s)]
             
+            # 2. Licznik (statystyki)
+            shift_counts = {emp['Imie']: 0 for emp in st.session_state.db_employees}
+            
             cnt = 0
-            for day_cfg in week_config:
-                current_date = day_cfg['date']
-                s1, sl, el = day_cfg['times']
-                k, b1, b2, c, om, oe = day_cfg['counts']
+            for cfg in week_config:
+                d_obj = cfg['date']
+                s1, sl, el = cfg['times']
+                k, b, o = cfg['counts']
                 
-                dt_start = datetime.combine(datetime.today(), s1) - timedelta(minutes=45)
-                t_open = dt_start.strftime("%H:%M")
-                t_bar_end = (datetime.combine(datetime.today(), sl) + timedelta(minutes=15)).strftime("%H:%M")
-                t_obs_end = (datetime.combine(datetime.today(), el) + timedelta(minutes=15)).strftime("%H:%M")
-                t_split = "16:00"
+                start = (datetime.combine(d_obj, s1) - timedelta(minutes=45)).strftime("%H:%M")
+                bar_end = (datetime.combine(d_obj, sl) + timedelta(minutes=15)).strftime("%H:%M")
+                obs_end = (datetime.combine(d_obj, el) + timedelta(minutes=15)).strftime("%H:%M")
+                split = "16:00"
                 
-                daily_tasks = []
-                for _ in range(k): daily_tasks.append(("Kasa", "morning", t_open, t_split)); daily_tasks.append(("Kasa", "evening", t_split, t_bar_end))
-                for _ in range(b1): daily_tasks.append(("Bar 1", "morning", t_open, t_split)); daily_tasks.append(("Bar 1", "evening", t_split, t_bar_end))
-                for _ in range(b2): daily_tasks.append(("Bar 2", "morning", t_open, t_split)); daily_tasks.append(("Bar 2", "evening", t_split, t_bar_end))
-                for _ in range(c): daily_tasks.append(("Cafe", "morning", t_open, t_split)); daily_tasks.append(("Cafe", "evening", t_split, t_bar_end))
-                for _ in range(om): daily_tasks.append(("Obsługa", "morning", t_open, t_split))
-                for _ in range(oe): daily_tasks.append(("Obsługa", "evening", t_split, t_obs_end))
+                tasks = []
+                for _ in range(k): tasks.append(("Kasa", "morning", start, split)); tasks.append(("Kasa", "evening", split, bar_end))
+                for _ in range(b1): tasks.append(("Bar 1", "morning", start, split)); tasks.append(("Bar 1", "evening", split, bar_end))
+                for _ in range(b2): tasks.append(("Bar 2", "morning", start, split)); tasks.append(("Bar 2", "evening", split, bar_end))
+                for _ in range(c): tasks.append(("Cafe", "morning", start, split)); tasks.append(("Cafe", "evening", split, bar_end))
+                for _ in range(om): tasks.append(("Obsługa", "morning", start, split))
+                for _ in range(oe): tasks.append(("Obsługa", "evening", split, obs_end))
                 
-                assigned_today = {'morning': [], 'evening': []}
-                emp_df = pd.DataFrame(st.session_state.db_employees)
-                
-                for role, t_type, s, e in daily_tasks:
-                    worker_name = find_worker_for_shift(role, t_type, current_date, emp_df, st.session_state.db_avail, assigned_today)
-                    final = worker_name if worker_name is not None else ""
+                assigned = {'morning': [], 'evening': [], 'all_day': []}
+                for role, t_type, s, e in tasks:
+                    worker = find_worker_for_shift(role, t_type, d_obj, st.session_state.db_employees, st.session_state.db_avail, assigned, shift_counts)
+                    final = worker if worker else ""
+                    
                     st.session_state.db_shifts.append({
-                        "Data": str(current_date), "Stanowisko": role, "Godziny": f"{s}-{e}", "Pracownik_Imie": final, "Typ": "Auto"
+                        "Data": str(d_obj), "Stanowisko": role, "Godziny": f"{s}-{e}", "Pracownik_Imie": final, "Typ": "Auto"
                     })
-                    if worker_name is not None: assigned_today[t_type].append(worker_name)
+                    if worker:
+                        assigned[t_type].append(worker)
+                        assigned['all_day'].append(worker)
+                        shift_counts[worker] += 1
                     cnt += 1
             
             save_all()
-            st.success(f"Wygenerowano {cnt} zmian! Przejdź do zakładki 'Grafik (WIZUALNY)'.")
+            st.success(f"Wygenerowano {cnt} zmian! Zobacz Grafik.")
 
     # --- 2. DYSPOZYCJE ---
     elif menu == "Dyspozycje (Podgląd)":
-        st.title("📥 Dyspozycje")
+        st.title("📥 Dyspozycje (Podgląd)")
         today = datetime.now().date()
         d_start = st.date_input("Tydzień:", today)
         days = [d_start + timedelta(days=i) for i in range(7)]
@@ -513,7 +516,7 @@ elif st.session_state.user_role == "manager":
                 val = st.session_state.db_avail.get(key, "-")
                 r_cols[i+1].write(val)
 
-    # --- 3. KADRY (TWORZENIE KONT) ---
+    # --- 3. KADRY ---
     elif menu == "Kadry (Edycja)":
         st.title("📇 Kadry i Konta")
         
@@ -546,6 +549,10 @@ elif st.session_state.user_role == "manager":
     # --- 4. GRAFIK ---
     elif menu == "Grafik (WIZUALNY)":
         st.title("📋 Grafik")
+        
+        # --- TABY DLA WIDOKU I STATYSTYK ---
+        tab_g, tab_s = st.tabs(["Grafik", "📊 Statystyki Sprawiedliwości"])
+        
         today = datetime.now().date()
         d_start = st.date_input("Pokaż tydzień od (Piątek):", today)
         
@@ -558,12 +565,20 @@ elif st.session_state.user_role == "manager":
             df_view = df.loc[mask]
             
             if not df_view.empty:
-                # Przekazujemy "surowe" słowniki do renderera, bo HTML render lubi dicty/df
-                # Wcześniejsza funkcja render_html_schedule brała DF, więc jest OK
-                st.markdown(render_html_schedule(df_view, d_start), unsafe_allow_html=True)
-                st.write("---")
-                if st.button("🖨️ PDF"):
-                    pdf = generate_schedule_pdf(df_view, f"GRAFIK {d_start}")
-                    st.download_button("Pobierz", pdf, "grafik.pdf", "application/pdf")
+                with tab_g:
+                    st.markdown(render_html_schedule(df_view, d_start), unsafe_allow_html=True)
+                    st.write("---")
+                    if st.button("🖨️ PDF"):
+                        pdf = generate_schedule_pdf(df_view, f"GRAFIK {d_start}")
+                        st.download_button("Pobierz", pdf, "grafik.pdf", "application/pdf")
+                
+                with tab_s:
+                    st.subheader("Kto ile ma zmian?")
+                    # Liczymy tylko niepuste
+                    real = df_view[df_view['Pracownik_Imie'] != ""]
+                    counts = real['Pracownik_Imie'].value_counts().reset_index()
+                    counts.columns = ["Pracownik", "Liczba"]
+                    st.bar_chart(counts.set_index("Pracownik"))
+                    st.dataframe(counts)
             else: st.info("Brak zmian w tym okresie.")
         else: st.info("Baza grafiku jest pusta.")
