@@ -7,7 +7,7 @@ import re
 import os
 import sqlite3
 import hashlib
-import streamlit.components.v1 as components
+
 
 
 # --- KONFIGURACJA ---
@@ -372,12 +372,14 @@ def render_html_schedule(df, start_date):
                     # === TUTAJ JEST ZMIANA - LINKI ===
                     if not emp_name or emp_name == "WAKAT":
                         # Tworzymy link z parametrem edit_id
-                        link = f"/?edit_id={row['id']}"
+                        link = f"?edit_id={row['id']}"
                         cell_content += f'''
                         <a href="{link}" target="_self" style="text-decoration: none;">
                             <div class="empty-shift-box">
-                                <span class="empty-time">{row["hours"]}</span>
-                            </div>
+    <span class="empty-time">{row["hours"]}</span>
+    <span class="shift-name" style="color:#cc0000; font-size:9px;">WAKAT</span>
+</div>
+
                         </a>
                         '''
                     else:
@@ -833,9 +835,13 @@ elif st.session_state.user_role == "manager":
                         st.session_state.needs_rerun = True # Flaga do odświeżenia
                         st.rerun()
                 else:
-                    st.warning("⚠️ Brak pracowników spełniających kryteria (Dyspozycje + 11h).")
-                    all_emps_force = [r[0] for r in get_db_connection().execute("SELECT name FROM employees").fetchall()]
-                    force_emp = st.selectbox("Wymuś przypisanie (wszyscy):", ["Wybierz..."] + all_emps_force)
+    st.warning("⚠️ Brak pracowników spełniających kryteria (Dyspozycje + 11h).")
+
+    conn2 = get_db_connection()
+    all_emps_force = [r[0] for r in conn2.execute("SELECT name FROM employees").fetchall()]
+    conn2.close()
+
+    force_emp = st.selectbox("Wymuś przypisanie (wszyscy):", ["Wybierz..."] + all_emps_force)
                     if force_emp != "Wybierz..." and st.button("Wymuś zapis"):
                         conn = get_db_connection()
                         conn.execute("UPDATE shifts SET employee_name=? WHERE id=?", (force_emp, shift_id))
@@ -845,11 +851,24 @@ elif st.session_state.user_role == "manager":
                         st.rerun()
 
         # Sprawdzenie czy kliknięto w link (parametr URL)
-        if "edit_id" in st.query_params:
-            s_id = st.query_params["edit_id"]
-            # Czyścimy URL żeby okno nie wyskakiwało po odświeżeniu
-            st.query_params.clear() 
-            edit_shift_dialog(s_id)
+       if "edit_id" in st.query_params:
+    s_raw = st.query_params["edit_id"]
+
+    # Streamlit potrafi zwrócić listę – normalizujemy do stringa
+    if isinstance(s_raw, list):
+        s_raw = s_raw[0]
+
+    try:
+        s_id = int(s_raw)
+    except (TypeError, ValueError):
+        s_id = None
+
+    # Czyścimy URL, żeby dialog nie wyskakiwał po każdym odświeżeniu
+    st.query_params.clear()
+
+    if s_id is not None:
+        edit_shift_dialog(s_id)
+
 
         # --- GŁÓWNY WIDOK GRAFIKU ---
         st.title("📋 Grafik")
@@ -892,5 +911,6 @@ elif st.session_state.user_role == "manager":
                 counts.columns = ["Pracownik", "Liczba Zmian"]
                 st.bar_chart(counts.set_index("Pracownik"))
                 st.dataframe(counts)
+
 
 
