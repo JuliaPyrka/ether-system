@@ -802,73 +802,91 @@ elif st.session_state.user_role == "manager":
         conn.close()
         st.dataframe(users)
 
-    elif menu == "Grafik (WIZUALNY)":
+        elif menu == "Grafik (WIZUALNY)":
         
         # --- OBSŁUGA KLIKNIĘCIA W WAKAT (MODAL) ---
         @st.dialog("⚡ Uzupełnij Wakat")
-        def edit_shift_dialog(shift_id):
+        def edit_shift_dialog(shift_id: int):
+            # Pobierz dane zmiany
             conn = get_db_connection()
-            s_data = conn.execute("SELECT date, role, hours FROM shifts WHERE id=?", (shift_id,)).fetchone()
+            s_data = conn.execute(
+                "SELECT date, role, hours FROM shifts WHERE id=?",
+                (shift_id,)
+            ).fetchone()
             conn.close()
             
-            if s_data:
-                s_date, s_role, s_hours = s_data
-                st.write(f"📅 **Data:** {s_date}")
-                st.write(f"⏰ **Godziny:** {s_hours}")
-                st.write(f"🎭 **Stanowisko:** {s_role}")
+            if not s_data:
+                st.error("Nie znaleziono tej zmiany.")
+                return
+            
+            s_date, s_role, s_hours = s_data
+            st.write(f"📅 **Data:** {s_date}")
+            st.write(f"⏰ **Godziny:** {s_hours}")
+            st.write(f"🎭 **Stanowisko:** {s_role}")
+            
+            # Szukamy dostępnych według dyspozycji + 11h
+            d_obj = datetime.strptime(s_date, "%Y-%m-%d").date()
+            candidates = get_candidates_for_shift(d_obj, s_role, s_hours)
+            
+            if candidates:
+                st.success(f"Znaleziono {len(candidates)} dostępnych osób.")
+                candidates.sort()
+                selected_emp = st.selectbox("Wybierz pracownika:", candidates)
                 
-                # Szukamy dostępnych
-                d_obj = datetime.strptime(s_date, "%Y-%m-%d").date()
-                candidates = get_candidates_for_shift(d_obj, s_role, s_hours)
-                
-                if candidates:
-                    st.success(f"Znaleziono {len(candidates)} dostępnych osób.")
-                    # Sortujemy alfabetycznie dla porządku
-                    candidates.sort()
-                    selected_emp = st.selectbox("Wybierz pracownika:", candidates)
-                    
-                    if st.button("Zapisz pracownika"):
-                        conn = get_db_connection()
-                        conn.execute("UPDATE shifts SET employee_name=? WHERE id=?", (selected_emp, shift_id))
-                        conn.commit()
-                        conn.close()
-                        st.session_state.needs_rerun = True # Flaga do odświeżenia
-                        st.rerun()
-                else:
-    st.warning("⚠️ Brak pracowników spełniających kryteria (Dyspozycje + 11h).")
+                if st.button("Zapisz pracownika"):
+                    conn = get_db_connection()
+                    conn.execute(
+                        "UPDATE shifts SET employee_name=? WHERE id=?",
+                        (selected_emp, shift_id)
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.session_state.needs_rerun = True
+                    st.rerun()
+            else:
+                st.warning("⚠️ Brak pracowników spełniających kryteria (Dyspozycje + 11h).")
 
-    conn2 = get_db_connection()
-    all_emps_force = [r[0] for r in conn2.execute("SELECT name FROM employees").fetchall()]
-    conn2.close()
+                # Lista wszystkich pracowników do wymuszonego przypisania
+                conn2 = get_db_connection()
+                all_emps_force = [
+                    r[0] for r in conn2.execute("SELECT name FROM employees").fetchall()
+                ]
+                conn2.close()
 
-    force_emp = st.selectbox("Wymuś przypisanie (wszyscy):", ["Wybierz..."] + all_emps_force)
-                    if force_emp != "Wybierz..." and st.button("Wymuś zapis"):
-                        conn = get_db_connection()
-                        conn.execute("UPDATE shifts SET employee_name=? WHERE id=?", (force_emp, shift_id))
-                        conn.commit()
-                        conn.close()
-                        st.session_state.needs_rerun = True
-                        st.rerun()
+                force_emp = st.selectbox(
+                    "Wymuś przypisanie (wszyscy):",
+                    ["Wybierz..."] + all_emps_force
+                )
+
+                if force_emp != "Wybierz..." and st.button("Wymuś zapis"):
+                    conn3 = get_db_connection()
+                    conn3.execute(
+                        "UPDATE shifts SET employee_name=? WHERE id=?",
+                        (force_emp, shift_id)
+                    )
+                    conn3.commit()
+                    conn3.close()
+                    st.session_state.needs_rerun = True
+                    st.rerun()
 
         # Sprawdzenie czy kliknięto w link (parametr URL)
-       if "edit_id" in st.query_params:
-    s_raw = st.query_params["edit_id"]
+        if "edit_id" in st.query_params:
+            s_raw = st.query_params["edit_id"]
 
-    # Streamlit potrafi zwrócić listę – normalizujemy do stringa
-    if isinstance(s_raw, list):
-        s_raw = s_raw[0]
+            # Streamlit potrafi zwrócić listę – normalizujemy
+            if isinstance(s_raw, list):
+                s_raw = s_raw[0]
 
-    try:
-        s_id = int(s_raw)
-    except (TypeError, ValueError):
-        s_id = None
+            try:
+                s_id = int(s_raw)
+            except (TypeError, ValueError):
+                s_id = None
 
-    # Czyścimy URL, żeby dialog nie wyskakiwał po każdym odświeżeniu
-    st.query_params.clear()
+            # Czyścimy URL, żeby dialog nie wyskakiwał przy każdym odświeżeniu
+            st.query_params.clear()
 
-    if s_id is not None:
-        edit_shift_dialog(s_id)
-
+            if s_id is not None:
+                edit_shift_dialog(s_id)
 
         # --- GŁÓWNY WIDOK GRAFIKU ---
         st.title("📋 Grafik")
@@ -893,7 +911,7 @@ elif st.session_state.user_role == "manager":
                 st.rerun()
 
             if not df_view.empty:
-                # Render HTML z linkami
+                # Render HTML z linkami ?edit_id=ID
                 st.markdown(render_html_schedule(df_view, d_start), unsafe_allow_html=True)
                 
                 c1, c2 = st.columns(2)
@@ -911,6 +929,7 @@ elif st.session_state.user_role == "manager":
                 counts.columns = ["Pracownik", "Liczba Zmian"]
                 st.bar_chart(counts.set_index("Pracownik"))
                 st.dataframe(counts)
+
 
 
 
