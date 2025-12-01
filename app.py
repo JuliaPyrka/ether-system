@@ -976,7 +976,7 @@ elif st.session_state.user_role == "manager":
                 )
 
     # --- DYSPOZYCJE (PODGLĄD + EDYCJA KIEROWNIKA) ---
-    elif menu == "Dyspozycje (Podgląd)":
+       elif menu == "Dyspozycje (Podgląd)":
         st.title("📥 Dyspozycje")
 
         # Sterowanie tygodniami (strzałki)
@@ -992,16 +992,29 @@ elif st.session_state.user_role == "manager":
 
         d_start = st.session_state.active_week_start
         days = [d_start + timedelta(days=i) for i in range(7)]
+        week_end = d_start + timedelta(days=6)
+        today = datetime.now().date()
+
         st.caption(
             f"Tydzień: {d_start.strftime('%d.%m')} - "
-            f"{(d_start + timedelta(days=6)).strftime('%d.%m')} (Piątek–Czwartek)"
+            f"{week_end.strftime('%d.%m')} (Piątek–Czwartek)"
         )
 
-        locked = is_availability_locked()
-        if locked:
-            st.error("🔒 Edycja dyspozycji zablokowana (po poniedziałku 23:00).")
+        # 1) Czy ten tydzień jest już całkowicie w przeszłości?
+        is_past_week = week_end < today
+
+        # 2) Globalna blokada (poniedziałek 23:00) – dla aktualnego / przyszłego tygodnia
+        locked_global = is_availability_locked()
+
+        if is_past_week:
+            locked = True
+            st.error("🔒 Tydzień archiwalny – edycja niedostępna (tylko podgląd).")
         else:
-            st.success("🔓 Edycja dyspozycji otwarta.")
+            locked = locked_global
+            if locked:
+                st.error("🔒 Edycja dyspozycji zablokowana (po poniedziałku 23:00).")
+            else:
+                st.success("🔓 Edycja dyspozycji otwarta.")
 
         conn = get_db_connection()
         emps = conn.execute("SELECT name FROM employees ORDER BY name").fetchall()
@@ -1035,9 +1048,7 @@ elif st.session_state.user_role == "manager":
                     )
                     avail_changes[(emp_name, date_str)] = new_val
 
-            submitted = st.form_submit_button(
-                "💾 Zapisz zmiany", disabled=locked
-            )
+            submitted = st.form_submit_button("💾 Zapisz zmiany", disabled=locked)
             if submitted and not locked:
                 for (emp_name, date_str), val in avail_changes.items():
                     save_avail_db(emp_name, date_str, val)
@@ -1213,3 +1224,4 @@ elif st.session_state.user_role == "manager":
                 counts.columns = ["Pracownik", "Liczba Zmian"]
                 st.bar_chart(counts.set_index("Pracownik"))
                 st.dataframe(counts)
+
