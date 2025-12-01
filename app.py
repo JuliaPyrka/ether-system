@@ -8,7 +8,7 @@ import json
 import os
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="ETHER | FULL CONTROL", layout="wide")
+st.set_page_config(page_title="ETHER | COMPLETE MERGE", layout="wide")
 DATA_FOLDER = "ether_data"
 
 # --- STYLE CSS ---
@@ -16,7 +16,7 @@ st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #e0e0e0; }
     
-    /* UI ELEMENTY */
+    /* TABS & PANELS */
     .stTabs [data-baseweb="tab-list"] { gap: 10px; background-color: #1a1c24; padding: 10px; border-radius: 10px; margin-top: 10px; }
     .stTabs [data-baseweb="tab"] { background-color: #333; border-radius: 5px; color: white; padding: 5px 20px; border: 1px solid #555; }
     .stTabs [aria-selected="true"] { background-color: #3b82f6 !important; font-weight: bold; border: 1px solid #3b82f6; }
@@ -258,6 +258,12 @@ if 'db_logs' not in st.session_state:
     st.session_state.db_logs = load_json('db_logs.json', [])
 if 'db_inbox' not in st.session_state:
     st.session_state.db_inbox = load_json('db_inbox.json', {})
+if 'active_week_start' not in st.session_state:
+    today = datetime.now().date()
+    days_ahead = 4 - today.weekday()
+    if days_ahead <= 0: days_ahead += 7
+    if today.weekday() == 4: st.session_state.active_week_start = today
+    else: st.session_state.active_week_start = today + timedelta(days=days_ahead)
 
 if not st.session_state.db_employees:
     raw_data = [
@@ -295,7 +301,6 @@ if not st.session_state.db_employees:
     
     if "julia" not in st.session_state.db_users:
         st.session_state.db_users["julia"] = {"pass": "julia1", "role": "worker", "name": "Julia Bąk"}
-    
     save_all()
 
 def save_all():
@@ -322,6 +327,7 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.session_state.user_role = user_data["role"]
                 st.session_state.user_name = user_data["name"]
+                st.session_state.user_login = u
                 st.rerun()
             else: st.error("Błąd.")
     st.stop()
@@ -480,6 +486,7 @@ elif st.session_state.user_role == "manager":
         with st.container(border=True):
             week_start = st.date_input("Start (Piątek):", next_friday, min_value=today)
             if week_start.weekday() != 4: st.error("⛔ Wybierz PIĄTEK!"); st.stop()
+            st.session_state.active_week_start = week_start
         
         preload_demo_data(week_start)
         week_days = [week_start + timedelta(days=i) for i in range(7)]
@@ -501,19 +508,14 @@ elif st.session_state.user_role == "manager":
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
                     k_m = c1.selectbox("KASA Rano", [0,1,2], index=1, key=f"km_{i}")
                     k_e = c1.selectbox("KASA Wieczór", [0,1,2], index=1, key=f"ke_{i}")
-                    
                     b1_m = c2.selectbox("BAR 1 Rano", [0,1,2,3], index=1, key=f"b1m_{i}")
                     b1_e = c2.selectbox("BAR 1 Wieczór", [0,1,2,3], index=1, key=f"b1e_{i}")
-                    
                     b2_m = c3.selectbox("BAR 2 Rano", [0,1,2], index=0, key=f"b2m_{i}")
                     b2_e = c3.selectbox("BAR 2 Wieczór", [0,1,2], index=1, key=f"b2e_{i}")
-                    
                     c_m = c4.selectbox("CAFE Rano", [0,1,2], index=1, key=f"cm_{i}")
                     c_e = c4.selectbox("CAFE Wieczór", [0,1,2], index=1, key=f"ce_{i}")
-                    
                     o_m = c5.selectbox("OBS RANO", [1,2,3], index=1, key=f"om_{i}")
                     o_e = c6.selectbox("OBS NOC", [1,2,3,4], index=2, key=f"oe_{i}")
-                    
                 week_config.append({"date": week_days[i], "times": (s1,sl,el), "counts": (k_m, k_e, b1_m, b1_e, b2_m, b2_e, c_m, c_e, o_m, o_e)})
 
         if st.button("⚡ GENERUJ", type="primary"):
@@ -527,7 +529,6 @@ elif st.session_state.user_role == "manager":
             for cfg in week_config:
                 d_obj = cfg['date']
                 s1, sl, el = cfg['times']
-                # Rozpakowanie pełnej konfiguracji
                 km, ke, b1m, b1e, b2m, b2e, cm, ce, om, oe = cfg['counts']
                 
                 start = (datetime.combine(d_obj, s1) - timedelta(minutes=45)).strftime("%H:%M")
@@ -567,8 +568,8 @@ elif st.session_state.user_role == "manager":
 
     elif menu == "Dyspozycje (Podgląd)":
         st.title("📥 Dyspozycje")
-        today = datetime.now().date()
-        d_start = st.date_input("Tydzień:", today)
+        d_start = st.session_state.active_week_start
+        st.info(f"Podgląd dla tygodnia: {d_start.strftime('%d.%m')}")
         days = [d_start + timedelta(days=i) for i in range(7)]
         day_names = ["Pt", "Sb", "Nd", "Pn", "Wt", "Śr", "Cz"]
         cols = st.columns([2] + [1]*7)
@@ -602,17 +603,31 @@ elif st.session_state.user_role == "manager":
                     save_all()
                     st.success("Konto utworzone!")
                     st.rerun()
+        
+        # EDYCJA PRACOWNIKA (PRZYWRÓCONA)
         st.write("---")
-        users_data = []
-        for login, data in st.session_state.db_users.items():
-            users_data.append({"Login": login, "Imię": data["name"], "Rola": data["role"]})
-        st.dataframe(pd.DataFrame(users_data))
+        st.subheader("Edytuj Istniejącego")
+        emp_names = [e['Imie'] for e in st.session_state.db_employees]
+        selected = st.selectbox("Wybierz osobę:", ["-- WYBIERZ --"] + emp_names)
+        
+        if selected != "-- WYBIERZ --":
+            idx = next(i for i, e in enumerate(st.session_state.db_employees) if e['Imie'] == selected)
+            curr = st.session_state.db_employees[idx]
+            with st.form("edit_form"):
+                n_name = st.text_input("Imię", value=curr['Imie'])
+                n_roles = st.multiselect("Role", ["Obsługa", "Bar", "Kasa", "Cafe"], default=curr['Role'])
+                if st.form_submit_button("Zapisz Zmiany"):
+                    st.session_state.db_employees[idx]['Imie'] = n_name
+                    st.session_state.db_employees[idx]['Role'] = n_roles
+                    st.session_state.db_employees[idx]['Auto'] = calculate_auto_roles(n_roles)
+                    save_all()
+                    st.rerun()
 
     elif menu == "Grafik (WIZUALNY)":
         st.title("📋 Grafik")
         tab_g, tab_s = st.tabs(["Grafik", "📊 Statystyki"])
-        today = datetime.now().date()
-        d_start = st.date_input("Pokaż tydzień od (Piątek):", today)
+        d_start = st.session_state.active_week_start
+        
         df = pd.DataFrame(st.session_state.db_shifts)
         if not df.empty:
             df['DataObj'] = pd.to_datetime(df['Data']).dt.date
@@ -626,6 +641,7 @@ elif st.session_state.user_role == "manager":
                     if st.button("🖨️ PDF"):
                         pdf = generate_schedule_pdf(df_view, f"GRAFIK {d_start}")
                         st.download_button("Pobierz", pdf, "grafik.pdf", "application/pdf")
+                    
                     st.write("---")
                     st.subheader("🛠️ Szybka Korekta")
                     df_view['Label'] = df_view.apply(lambda x: f"{x['Data']} | {x['Stanowisko']} | {x['Pracownik_Imie']}", axis=1)
