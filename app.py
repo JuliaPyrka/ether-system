@@ -369,24 +369,27 @@ def render_html_schedule(df, start_date):
                 current_shifts = df[(df['Data_Obj'] == d) & (df['role'].str.contains(role, regex=False))]
                 for _, row in current_shifts.iterrows():
                     emp_name = row['employee_name']
-                    # === TUTAJ JEST ZMIANA - LINKI ===
                     if not emp_name or emp_name == "WAKAT":
-                        # Tworzymy link z parametrem edit_id
                         link = f"?edit_id={row['id']}"
-                        cell_content += f'''
-                        <a href="{link}" target="_self" style="text-decoration: none;">
-                            <div class="empty-shift-box">
-    <span class="empty-time">{row["hours"]}</span>
-    <span class="shift-name" style="color:#cc0000; font-size:9px;">WAKAT</span>
-</div>
-
-                        </a>
-                        '''
+                        cell_content += (
+                            f'<a href="{link}" target="_self" style="text-decoration:none;">'
+                            f'<div class="empty-shift-box">'
+                            f'<span class="empty-time">{row["hours"]}</span>'
+                            f'<span class="shift-name" '
+                            f'style="color:#cc0000; font-size:9px;">WAKAT</span>'
+                            f'</div>'
+                            f'</a>'
+                        )
                     else:
                         display_pos = "(Combo)" if "+" in row['role'] else ""
                         parts = emp_name.split(" ")
                         short = (parts[0] + " " + parts[-1][0] + ".") if len(parts) >= 2 else emp_name
-                        cell_content += f'<div class="shift-box"><span class="shift-time">{row["hours"]}</span><span class="shift-name">{short} {display_pos}</span></div>'
+                        cell_content += (
+                            f'<div class="shift-box">'
+                            f'<span class="shift-time">{row["hours"]}</span>'
+                            f'<span class="shift-name">{short} {display_pos}</span>'
+                            f'</div>'
+                        )
             html += f'<td {td_class}>{cell_content}</td>'
         html += '</tr>'
     html += '</tbody></table>'
@@ -945,6 +948,7 @@ elif st.session_state.user_role == "manager":
                 counts.columns = ["Pracownik", "Liczba Zmian"]
                 st.bar_chart(counts.set_index("Pracownik"))
                 st.dataframe(counts)
+
 
 
 
