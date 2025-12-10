@@ -580,6 +580,6 @@ else:
 # Stopka JARVISA
 st.divider()
 st.caption("ETHER SYSTEM v3.0 | Powered by JARVIS Logic Module | Leszno, PL")
-```
+
 
 
