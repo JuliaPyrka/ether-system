@@ -582,15 +582,4 @@ st.divider()
 st.caption("ETHER SYSTEM v3.0 | Powered by JARVIS Logic Module | Leszno, PL")
 ```
 
-### Co z tym zrobić, szefie?
 
-1.  **Zainstaluj zależności** (jeśli jeszcze ich nie masz):
-    ```bash
-    pip install streamlit pandas fpdf
-    ```
-    *(Uwaga: Streamlit musi być w wersji min. 1.34.0, żeby działały okienka `st.dialog`. Sprawdź komendą `pip show streamlit`, a jak trzeba to zaktualizuj: `pip install --upgrade streamlit`).*
-
-2.  **Uruchomienie:**
-    Uruchom plik `app.py`:
-    ```bash
-    streamlit run app.py
